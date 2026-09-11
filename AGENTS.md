@@ -4,19 +4,15 @@
 
 This repository implements `stock-model-selection`.
 
-Version 1 trains and evaluates stock-selection models using PIT-safe data from `stock-data-center`.
+Version 1 does NOT use `stock-eps-model`.
 
-Version 1 intentionally does NOT use `stock-eps-model` or predicted EPS features.
+Highest-priority rule:
 
-Highest-priority requirement:
+> Rank each cohort using only historically valid Data Center information and only earlier fully realized labels.
 
-> The model that ranks a cohort may use only information available before that cohort and labels from earlier cohorts whose outcomes were already complete.
+## 1. Canonical Roadmap
 
----
-
-# 1. Source of Truth
-
-The canonical roadmap is:
+Use:
 
 ```text
 ROADMAP.md
@@ -24,119 +20,72 @@ ROADMAP.md
 
 Work one phase at a time.
 
-Do not begin the next phase until all current acceptance criteria pass.
-
-At the end of each phase, produce:
-
-```text
-Phase N Acceptance Report
-```
-
-with PASS/FAIL and concrete evidence.
-
-If a required criterion fails, stop.
-
----
-
-# 2. Fixed Technology Stack
-
-Unless `ROADMAP.md` is explicitly amended:
-
-```text
-Python 3.12+
-Pydantic 2.x
-pandas
-numpy
-scikit-learn
-LightGBM
-httpx
-pytest
-joblib
-```
-
-Do not add stock-data database drivers.
-
----
-
-# 3. Absolute Rule — No Direct Stock DB Access
-
-This repository must never connect directly to the `stock-data-center` database.
+## 2. No Direct DB or Redis Access
 
 Forbidden:
 
-```python
-create_engine(DATA_CENTER_DB_URL)
-psycopg.connect(...)
-asyncpg.connect(...)
+```text
+PostgreSQL connections
+raw SQL
+Data Center table names
+Redis access
 ```
 
-Forbidden concepts:
+All source/canonical data comes from Data Center API/SDK.
+
+## 3. No stock-eps-model Dependency in v1
+
+No predicted EPS features or EPS-model client/imports.
+
+Historical actual EPS from Data Center is allowed.
+
+## 4. Canonical Derived Data Rule
+
+If Data Center provides a canonical metric, do not independently reimplement it here.
+
+Examples:
 
 ```text
-raw SQL against Data Center
-knowledge of Data Center table names
-manual publication-time SQL filters
+MA20
+historical volatility
+revenue YoY
+TTM EPS
+ROE
+shareholding concentration
+margin ratios
+short-interest ratios
+canonical valuation metrics
 ```
 
-All stock/accounting data comes through the Data Center API or SDK.
+Reimplementation requires an ADR.
 
----
+## 5. Model-Specific Feature Rule
 
-# 4. Absolute Rule — No `stock-eps-model` Dependency in v1
-
-Do not add:
+This repo owns ranking-specific transforms such as:
 
 ```text
-predicted_eps
-EPS prediction artifacts
-stock_eps_model imports
-EPS model API client
+cross-sectional ranks
+z-scores
+percentiles
+universe-relative normalization
+interaction terms
+composite ranking features
 ```
 
-in v1.
+## 6. Derivation-Version Rule
 
-Historical actual EPS from Data Center is allowed if PIT-safe.
-
-If predicted EPS is added later, it requires:
+Every consumed canonical derived dataset must record:
 
 ```text
-new feature schema version
-ADR
-ROADMAP amendment
-incremental-value evaluation
+dataset_code
+derivation_version
 ```
 
----
+in dataset, model, ranking, and backtest provenance.
 
-# 5. PIT Context Is Mandatory
+## 7. Entry Date Rule
 
-Preferred types:
-
-```text
-MarketPitContext
-    information_as_of
-    knowledge_as_of
-
-SystemPitContext
-    system_as_of
-```
-
-Selection-specific dates:
-
-```text
-playbook_date
-entry_date
-exit_date
-label_available_at
-```
-
-Do not collapse these into an ambiguous `date`.
-
----
-
-# 6. Entry Date Is Never the Information Cutoff
-
-This is a non-negotiable invariant.
+`entry_date` is not an information cutoff.
 
 Forbidden:
 
@@ -144,173 +93,66 @@ Forbidden:
 fetch_features(as_of=entry_date)
 ```
 
-unless a future explicit contract states that `entry_date == information_as_of`.
+except under an explicitly changed contract.
 
-Normal design:
+## 8. Historical Universe Rule
+
+Never use today's active universe for historical cohorts.
+
+Universe comes from Data Center PIT queries.
+
+## 9. Forward-Return Label Rule
+
+Future return is allowed only as a historical label.
+
+It is never a feature.
+
+A label is trainable only after its horizon is complete.
+
+## 10. Target Cohort Rule
+
+Target cohort C must be excluded from:
 
 ```text
-information_as_of < entry_date
+its own training rows
+all later cohorts
+all earlier cohorts with incomplete labels
 ```
 
-The old entry-date look-ahead bug must remain permanently covered by regression tests.
+Treat violations as P0 leakage bugs.
 
----
+## 11. Dataset Construction Rule
 
-# 7. Historical Universe Must Be PIT-Safe
+Do not build one current-state dataset and slice by historical dates.
 
-Do not use today's active-stock list for historical cohorts.
+Each cohort is PIT-correct at construction time.
 
-The universe must come from Data Center under the cohort PIT context.
-
-A future-listed stock cannot appear early.
-
-A later-delisted stock may appear historically if it was eligible then.
-
----
-
-# 8. Data Center Client Boundary
-
-All external stock-data access goes through one client abstraction.
-
-Feature modules do not issue HTTP requests directly.
-
-Tests must be able to replace the client with a fake/in-memory implementation.
-
----
-
-# 9. Feature Rules
+## 12. Feature Module Rule
 
 Feature modules:
 
-- accept normalized PIT-safe data
-- compute deterministic features
-- do not query databases
-- do not query external services
+- consume normalized Data Center data
+- compute only model-specific transforms
+- do not fetch external data
 - do not decide publication visibility
-- do not future-fill unavailable historical data
-- do not use predicted EPS in v1
+- do not duplicate canonical Data Center metrics
 
-Every feature must document:
+## 13. Training Split
 
-```text
-inputs
-formula
-missing-value behavior
-dtype
-schema version
-```
+Use walk-forward / expanding / explicitly documented rolling windows.
 
----
+Random split is not primary historical evaluation.
 
-# 10. Feature Schema
+## 14. Model Artifact Provenance
 
-The base schema should be explicitly versioned, for example:
+Every model must include:
 
 ```text
-selection_features_v1_base
-```
-
-Do not rely on dataframe column order alone.
-
-Models must fail loudly on incompatible schemas.
-
----
-
-# 11. Forward-Return Label Rules
-
-Future return is allowed as a historical supervised label.
-
-It is never allowed as a feature.
-
-A label must define:
-
-```text
-entry date
-exit date
-entry price convention
-exit price convention
-label_available_at
-```
-
-A label is training-eligible only after its horizon has completed.
-
----
-
-# 12. Target Cohort Cannot Train Itself
-
-This is a P0 leakage invariant.
-
-For target cohort C:
-
-```text
-train_model_for(C)
-```
-
-must exclude:
-
-```text
-C
-all later cohorts
-all earlier cohorts whose labels are not yet available
-```
-
-Do not infer eligibility from filenames or current DB state.
-
-Derive it from the explicit label-availability contract.
-
----
-
-# 13. Training Split Rules
-
-Primary historical evaluation must be time-aware.
-
-Use:
-
-```text
-walk-forward
-expanding window
-explicit rolling window
-```
-
-Do not use random train/test split as the primary evaluation.
-
----
-
-# 14. Dataset Construction Rule
-
-Do not build one present-day dataset and merely slice it by historical dates.
-
-Each cohort's features must be reconstructed with its own PIT context.
-
----
-
-# 15. Missing Data Rules
-
-Historical missing data remains missing unless a documented transformation uses only already-visible data.
-
-Forbidden:
-
-```text
-future fill
-later financial statement substitution
-later revenue substitution
-current-value substitution
-```
-
-ML imputation is separate from historical availability.
-
----
-
-# 16. Model Artifact Rules
-
-Every selection model must retain:
-
-```text
-model hash
 target cohort
 training cutoff
 PIT context
 Data Center provenance
+canonical derivation versions
 training dataset hash
 feature schema version
 hyperparameters
@@ -320,303 +162,87 @@ package versions
 metrics
 ```
 
-A model without reproducible provenance is incomplete.
+## 15. Ranking Artifact Rule
 
----
+Published ranking artifacts are immutable.
 
-# 17. Ranking Artifact Rules
+Historical reruns create new reconstruction artifacts.
 
-Every ranking batch must retain:
+Never overwrite an original production ranking.
 
-```text
-ranking ID
-model ID
-cohort ID
-playbook date
-PIT context
-entry date
-candidate count
-Top-K
-feature dataset hash
-Data Center provenance
-git commit
-```
+## 16. Backtest Rule
 
-Once published, a ranking artifact is immutable.
-
-A later historical rerun creates a new reconstruction artifact; it must not overwrite the original production ranking.
-
----
-
-# 18. Backtest Rules
-
-Backtester consumes frozen ranking artifacts.
+Backtester consumes frozen rankings.
 
 It must not:
 
-- rebuild features
-- query financial data to "fix" a ranking
-- apply month-specific PIT patches
-- silently skip known-bad cohorts instead of fixing data semantics
-
-Trading rules, fees, slippage, and rebalance logic must be explicit.
-
----
-
-# 19. No Month-Specific Leakage Workarounds
-
-Forbidden pattern:
-
-```python
-if month in (2, 3):
-    skip_entry = True
+```text
+rebuild features
+rerun model
+repair PIT semantics
+apply month-specific leakage workarounds
 ```
 
-when the underlying reason is unavailable financial information.
+It may query Data Center for trade prices, corporate actions, and benchmark/index history.
 
-Availability belongs to Data Center.
+## 17. Leakage Regression Tests
 
-Missing features should be handled by the model/data contract, not hidden inside backtest logic.
-
----
-
-# 20. Leakage Regression Tests
-
-Permanently protect at least:
+Permanent cases:
 
 ```text
-7/11 feature request cannot use 7/13 entry-date data
-7/10 cutoff cannot see later revenue through selection code
-future Q4 data cannot leak into earlier cohort features
-today's universe cannot replace historical universe
-target cohort cannot train itself
-incomplete forward-return label cannot enter training
-future return cannot appear as feature
-same PIT/model inputs -> same ranking
+entry-date lookahead
+target cohort self-training
+incomplete forward-return labels
+historical-universe drift
+future data leakage
+canonical derivation-version mismatch
 ```
 
-A leakage bug is not fixed until a regression test exists.
+## 18. Migration Rule
 
----
+Do not copy old `strategies/`, `models_selection/`, or `backtester/` wholesale.
 
-# 21. Direct DB Guard
+Do not migrate canonical metric implementations now owned by Data Center.
 
-Add an architectural/static test that detects forbidden dependencies such as:
-
-```text
-psycopg
-asyncpg
-Data Center create_engine
-known Data Center table names
-```
-
-Do not rely only on review discipline.
-
----
-
-# 22. No-EPS-Dependency Guard
-
-During v1, tests/static checks should reject accidental dependencies on:
-
-```text
-stock_eps_model
-predicted_eps
-eps_prediction
-```
-
-except documentation that explicitly explains their exclusion.
-
----
-
-# 23. Hashing Rules
-
-Deterministic dataset/model/ranking identities must not include unstable values such as:
-
-```text
-temporary paths
-random UUIDs
-wall-clock timestamps
-```
-
-unless those values are part of semantic identity.
-
-Timestamps may exist in manifests without contaminating deterministic content hashes.
-
----
-
-# 24. Timezone Rules
-
-All real-world timestamps must be timezone-aware.
-
-Taiwan-market interpretation uses:
-
-```text
-Asia/Taipei
-```
-
-Use ISO 8601 with explicit offsets at system boundaries.
-
-Never silently compare naive and aware datetimes.
-
----
-
-# 25. Error Handling
+## 19. Error Handling
 
 Fail loudly on:
 
 ```text
 missing PIT context
-invalid temporal ordering
-entry_date used as feature cutoff
-target cohort found in training data
-incomplete label horizon
-incompatible feature schema
+entry date used as feature cutoff
+target cohort in training
+missing/incompatible derivation version
 missing provenance
-ambiguous ranking/model artifact
+incompatible feature schema
 ```
 
-Never silently fall back to latest data.
-
----
-
-# 26. Migration Rules
-
-Do not copy old:
-
-```text
-strategies/
-models_selection/
-backtester/
-```
-
-wholesale.
-
-Potentially reusable after review:
-
-```text
-feature formulas
-model hyperparameters
-metrics
-ranking rules
-portfolio rules
-```
-
-Do not migrate:
-
-```text
-raw SQL
-DB setup
-manual publish-time filters
-entry-date feature lookup
-current-universe assumptions
-month-specific PIT workarounds
-implicit model-date logic
-```
-
-If old behavior conflicts with PIT correctness, PIT correctness wins.
-
----
-
-# 27. Scope Discipline
-
-When implementing one phase:
-
-- implement only that phase
-- do not pre-build later phases unless required
-- do not add EPS prediction support in v1
-- do not refactor unrelated modules
-- do not change PIT semantics silently
-- record major decisions in `docs/decisions/`
-- do not weaken acceptance criteria
-
----
-
-# 28. Phase Completion Checklist
-
-Before declaring a phase complete:
-
-```text
-tests pass
-documentation updated
-acceptance criteria evaluated
-no direct DB access introduced
-no stock-eps-model dependency introduced
-entry-date invariant preserved
-target-cohort exclusion preserved
-PIT invariants preserved
-no leakage regression introduced
-```
-
-Then provide the Acceptance Report.
-
----
-
-# 29. Priority Order
-
-When tradeoffs exist:
+## 20. Priority Order
 
 ```text
 1. no leakage
 2. PIT correctness
 3. target-cohort isolation
-4. reproducibility
+4. derivation-version reproducibility
 5. provenance
 6. deterministic behavior
-7. clear contracts
-8. maintainability
-9. model performance
-10. convenience
+7. maintainability
+8. model performance
+9. convenience
 ```
 
-Do not improve backtest performance by weakening the first six.
-
----
-
-# 30. Core Invariants
-
-A. `stock-model-selection` never directly accesses the stock DB.
-
-B. Version 1 does not depend on `stock-eps-model`.
-
-C. Every historical cohort uses an explicit PIT context.
-
-D. `entry_date` is not an information cutoff.
-
-E. Historical universe is PIT-safe.
-
-F. Future return is a label, never a feature.
-
-G. A target cohort cannot train the model that ranks itself.
-
-H. Cohorts with incomplete label horizons cannot enter training.
-
-I. Published ranking artifacts are immutable.
-
-J. Backtester consumes rankings and never repairs PIT mistakes.
-
-K. Every model, ranking, and backtest retains reproducible provenance.
-
----
-
-# 31. Core Boundary
+## 21. Core Boundary
 
 ```text
-stock-data-center owns:
-    source collection
-    security universe history
-    publication evidence
-    ingestion history
-    revision history
-    PIT visibility
+stock-data-center:
+    observed data
+    canonical reusable derived data
+    derivation versions
 
-stock-model-selection owns:
-    selection feature engineering
+stock-model-selection:
+    ranking-specific transforms
     forward-return labels
-    training datasets
-    walk-forward selection models
-    ranking / Top-K
-    ranking artifacts
+    training
+    ranking
     backtesting
 ```
-
-Version 1 must remain independent of `stock-eps-model`.
