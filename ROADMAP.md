@@ -34,6 +34,72 @@ canonical derived datasets
 
 No predicted EPS in v1.
 
+### Data Center API
+
+Access is HTTP only, read-only.
+
+```text
+base URL   env STOCKDC_BASE_URL   (LAN address; kept in .env, not in the repo)
+API key    env STOCKDC_API_KEY    (kept in .env, never committed)
+auth       every request sends header  X-API-Key: <key>
+
+GET /v1/datasets
+    catalog: name, kind (observed | derived | derived_on_demand), keys, period,
+    columns, sources, unsourced columns per source, and for derived datasets a
+    derivation block (dataset_code, derivation_version, formula, inputs,
+    calendar convention, price adjustment convention)
+
+GET /v1/datasets/{name}?start=YYYY-MM-DD&end=YYYY-MM-DD[&stock_id=2330&stock_id=2317]
+    [&information_as_of=<ISO-8601 with offset>&knowledge_as_of=<ISO-8601 with offset>]
+    start/end are required; start/end filter the dataset's period column
+    without stock_id: at most 31 days per request
+    at most 200 stock_ids per request
+    omitted *_as_of parameters default to now (listed in pit.defaulted)
+```
+
+Response shape (verified 2026-09-25):
+
+```text
+dataset, pit {mode, information_as_of, knowledge_as_of, defaulted, aliases}, query, rows
+observed rows:  recorded_at, available_at, provenance {fetch_id, raw_sha256}
+derived:        top-level derivation {dataset_code, derivation_version, ...}, inputs ("latest"),
+                rows carry computed_at, available_at
+derived_on_demand (technical-indicators-pit):
+                top-level view ("as_of" | "rolling"), rows carry information_as_of,
+                input_count, input_fingerprint
+financial-reports rows: nested facts [{statement, account_code, concept, period_start,
+                period_end, unit, value}]
+errors:         HTTP 400 with {"detail": "..."}
+```
+
+Observed PIT semantics (verified 2026-09-25):
+
+```text
+information_as_of filters rows by available_at
+    e.g. 2330 daily price of 2024-07-02 has available_at 2024-07-02T19:00Z (03:00 Taipei on D+1)
+knowledge_as_of filters rows by recorded_at
+    history was backfilled in 2026, so a historical knowledge_as_of returns zero rows
+materialized derived datasets report inputs = "latest": values are computed from the latest
+    input versions; only rows are filtered by available_at
+technical-indicators-pit computes indicators under full PIT on demand
+```
+
+Catalog on 2026-09-25:
+
+```text
+observed:  daily-prices, indices, official-valuations, institutional-flows,
+           institutional-market-flows, foreign-holdings, margin-trading, securities-lending,
+           shareholding-distributions, monthly-revenues, corporate-actions, financial-reports
+derived (all derivation_version v1):
+           technical-indicators, institutional-streaks, institutional-cumulative-flows,
+           shareholding-concentrations, margin-metrics, short-interest-metrics, valuation-metrics
+derived_on_demand:
+           technical-indicators-pit
+not in catalog:
+           historical universe / security master (listing, delisting, security type)
+           adjusted prices or total-return series
+```
+
 ---
 
 ## 3. Canonical vs Model-Specific Features
@@ -213,8 +279,25 @@ backtest contract
 
 Open decisions that must be resolved (or explicitly deferred to a named step) in this phase:
 
+Resolved:
+
 ```text
-Data Center API/SDK surface (package, PIT query parameters, derivation metadata fields)
+Data Center API surface: HTTP API, see §2 "Data Center API"
+```
+
+Open:
+
+```text
+knowledge_as_of for historical cohorts (decided in step-1): history was backfilled in 2026,
+    so a historical knowledge_as_of returns nothing; define which knowledge cutoff production
+    runs and historical reconstructions use
+restatement risk in materialized derived datasets (inputs = "latest", e.g. valuation-metrics
+    uses a report's latest version's facts): use a *-pit variant, request one from
+    Data Center, or accept and document the risk per dataset
+historical universe source: the catalog has no security master; request a PIT universe
+    dataset from Data Center, or document an interim rule
+adjusted prices: the catalog has no adjusted or total-return series; request one from
+    Data Center, or write an ADR before adjusting from corporate-actions here
 trading calendar source
 price convention for labels and backtest (adjusted vs raw, open vs close)
 benchmark index
@@ -237,21 +320,43 @@ Acceptance criteria:
 - Estimated code: 0 lines (docs only)
 - Deliverable: `docs/contracts/time-and-cohort.md`
   - cohort identity and playbook date
-  - information / knowledge / system cutoffs and their ordering
-  - entry/exit dates, label horizon, `label_available_at`
-  - universe semantics
-  - one worked timeline for a monthly cohort, including delayed monthly revenue and Q4 annual reports published in Feb–Mar
+  - cutoffs are timezone-aware timestamps, never bare dates. Data Center availability is intraday (a daily price for D becomes available at 03:00 Asia/Taipei on D+1), so a date-only cutoff is ambiguous.
+  - mapping to Data Center parameters: information cutoff → `information_as_of` (filters `available_at`); knowledge cutoff → `knowledge_as_of` (filters `recorded_at`)
+  - system cutoff: redefine it (e.g. code/model freeze point) or remove it. Data Center has no matching parameter.
+  - two run modes. Data Center history was backfilled in 2026, so a historical `knowledge_as_of` returns no rows.
+
+    | Mode | `information_as_of` | `knowledge_as_of` | Meaning |
+    |---|---|---|---|
+    | production | run time | run time | true PIT |
+    | reconstruction | the cohort's information cutoff | reconstruction time | what was public then, as recorded now |
+
+    Reconstruction sees corrections recorded after the cohort's cutoff; state this as a known limitation and tie the modes to the ranking artifact kinds (`production` / `reconstruction`, step-19).
+  - two PIT levels, defined here and chosen per dataset in step-2:
+    - row-level PIT: whether a row is visible, by `available_at`
+    - value-level PIT: which input versions a value was computed from. Materialized derived datasets report `inputs = "latest"`, so they are row-level PIT only.
+  - entry/exit dates and label horizon
+  - `label_available_at` = the `available_at` of the exit price (e.g. exit at the close of D → 03:00 Asia/Taipei on D+1)
+  - universe semantics (eligibility rules only; the data source is decided in step-2)
+  - a worked timeline for one monthly cohort using real Data Center `available_at` values, including:
+    - daily price of D: available 03:00 Asia/Taipei on D+1
+    - monthly revenue published around the 10th of the next month (June 2024 revenue of 2330: 2024-07-10 23:59 Asia/Taipei)
+    - quarterly report (2024 Q1 of 2330: 2024-05-15 23:59 Asia/Taipei) and Q4 annual reports published in Feb–Mar
+- Out of scope, decided in step-2: which PIT level each dataset must meet, the universe data source, the price convention (adjusted vs raw, open vs close).
 - Tests first: not applicable (docs only). The invariants written here become the first failing tests of step-4.
 - Acceptance:
   - [ ] entry date is explicitly not an information cutoff
+  - [ ] every cutoff is a timezone-aware timestamp
+  - [ ] each cutoff maps to a Data Center parameter, or its meaning without one is stated
+  - [ ] production and reconstruction modes defined, with the reconstruction limitation stated
+  - [ ] row-level and value-level PIT defined
   - [ ] target-cohort exclusion rule stated (own rows, later cohorts, earlier cohorts with incomplete labels)
-  - [ ] label availability rule stated
+  - [ ] `label_available_at` defined from the exit price's `available_at`
 
 ## step-2: Data dependency, ownership, and artifact contracts
 
 - Estimated code: 0 lines (docs only)
 - Deliverables:
-  - `docs/contracts/data-dependencies.md`: every Data Center dataset consumed, with `dataset_code`, required `derivation_version`, PIT query semantics
+  - `docs/contracts/data-dependencies.md`: every Data Center dataset consumed, with `dataset_code`, required `derivation_version`, PIT query semantics, and the PIT level it must meet (row-level or value-level, defined in step-1)
   - `docs/contracts/feature-ownership.md`: canonical vs model-specific table
   - `docs/contracts/ranking.md`, `docs/contracts/backtest.md`
   - `docs/adr/0000-template.md`: ADR template required for any canonical-metric reimplementation
@@ -320,11 +425,13 @@ Acceptance criteria:
 - Estimated code: ~600 lines
 - Split reason: the full client boundary (interface, schemas, fake) is estimated at ~1000 lines.
 - Content:
-  - `DataCenterClient` protocol: one method per v1 data source (§2). Feature data methods take `PitContext`. Trade-price, corporate-action, and index methods for labels/backtest take explicit dates.
-  - response schemas carrying `dataset_code`, `derivation_version`, per-row availability timestamp, source provenance
+  - `DataCenterClient` protocol: one method per v1 data source (§2). Feature data methods take `PitContext`, which maps to `information_as_of` / `knowledge_as_of`. Trade-price, corporate-action, and index methods for labels/backtest take explicit dates.
+  - response schemas per §2 "Data Center API": `pit` block, observed rows with `recorded_at`, `available_at`, `provenance`; derived responses with the `derivation` block; nested `facts` for financial-reports
+  - the `pit` block echoed by Data Center is kept in provenance; a response whose `pit.defaulted` lists a cutoff the caller supplied is rejected
   - error types: missing derivation version, PIT violation, missing provenance
 - Tests first:
   - a response without `derivation_version` or provenance is rejected
+  - a feature request whose response reports a defaulted cutoff is rejected
   - no feature-data method accepts `entry_date`
 
 ## step-5-b: PIT-enforcing fake Data Center client
@@ -344,10 +451,12 @@ Acceptance criteria:
 ## step-6: Real Data Center SDK adapter
 
 - Estimated code: ~300 lines
-- Depends on: step-2 (API surface decision), step-5-a
+- Depends on: step-5-a
 - Content:
-  - adapter implementing `DataCenterClient` over the Data Center API/SDK
-  - configuration via environment (endpoint, credentials); no secrets in repo
+  - adapter implementing `DataCenterClient` over the HTTP API in §2
+  - configuration from `STOCKDC_BASE_URL` and `STOCKDC_API_KEY`; every request sends `X-API-Key`; no secrets in repo
+  - request chunking within API limits: at most 200 stock_ids per request, at most 31 days per request without stock_id; results merged deterministically
+  - HTTP 400 `detail` surfaced as a typed error; no silent retry that changes the query
   - response mapping to schemas; `derivation_version` verified per response
 - Tests first: contract tests against recorded responses (no live network in CI); an optional live smoke test, marked and skipped in CI.
 - Parallel line: steps 7–21 develop against the fake client. This step must merge before step-22.
@@ -371,6 +480,7 @@ Acceptance criteria:
 - Estimated code: ~350 lines
 - Content:
   - `data/universe.py`: universe snapshot for a `PitContext` via Data Center PIT universe query
+  - blocked on the Phase 0 decision "historical universe source": the catalog has no security master yet
   - eligibility filters as defined in step-1
   - snapshot carries provenance and a content hash
   - defensive check: fail if Data Center returns a security listed after the cutoff
@@ -516,7 +626,7 @@ Target cohort must never train itself.
 - Estimated code: ~450 lines
 - Content:
   - `LabelSpec`: horizon, price convention (from step-2), `label_available_at`
-  - corporate actions handled from Data Center data (use Data Center adjusted prices if canonical; do not reimplement)
+  - corporate actions handled from Data Center data (use Data Center adjusted prices if canonical; do not reimplement). The catalog has no adjusted series yet; see the Phase 0 decision "adjusted prices".
   - explicit policy for suspension/delisting within the horizon
   - labels are a distinct type in `labels/` and cannot be passed into the feature builder
 - Tests first:
