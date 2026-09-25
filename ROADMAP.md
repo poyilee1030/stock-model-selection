@@ -82,6 +82,21 @@ canonical Data Center dependencies must record derivation_version
 backtester consumes frozen ranking artifacts
 ```
 
+### Test-First Rule
+
+Write tests before implementation code, for every phase and every change:
+
+```text
+1. write failing tests that encode the acceptance criteria / invariant
+2. run them and confirm they fail for the expected reason
+3. write the minimal implementation that makes them pass
+4. refactor with tests green
+```
+
+- Bug fixes start with a regression test that reproduces the bug.
+- Leakage and PIT invariants start as failing tests before the guarded code exists.
+- A PR that adds implementation without tests written first is incomplete.
+
 ---
 
 ## 5. Repository Structure
@@ -450,6 +465,7 @@ month-specific PIT workarounds
 - [ ] ranking artifacts immutable
 - [ ] backtest consumes frozen rankings
 - [ ] old leakage cases permanently tested
+- [ ] every phase implemented test-first
 
 ---
 
