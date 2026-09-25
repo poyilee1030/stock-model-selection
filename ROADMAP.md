@@ -51,10 +51,37 @@ GET /v1/datasets
 
 GET /v1/datasets/{name}?start=YYYY-MM-DD&end=YYYY-MM-DD[&stock_id=2330&stock_id=2317]
     [&information_as_of=<ISO-8601 with offset>&knowledge_as_of=<ISO-8601 with offset>]
+    [&system_as_of=<ISO-8601 with offset>]
     start/end are required; start/end filter the dataset's period column
     without stock_id: at most 31 days per request
     at most 200 stock_ids per request
     omitted *_as_of parameters default to now (listed in pit.defaulted)
+    information_as_of / knowledge_as_of: market PIT (public by, and recorded by, that instant)
+    system_as_of: system PIT, what Data Center had recorded by that instant, public or not;
+        not combinable with information_as_of or knowledge_as_of
+    stored derived datasets accept only knowledge_as_of = latest
+    other parameters: source (repeatable), statement / account_code (financial-reports),
+        view = as_of | rolling (technical-indicators-pit)
+
+GET /v1/stocks[?stock_id=2330][&market=sii|otc][&date=YYYY-MM-DD]
+    common stocks on TWSE (sii) and TPEx (otc): every stock on today's list plus every one
+    delisted since 2020-01-02; no ETF, preferred share, TDR, warrant, innovation-board stock
+    row: stock_id, name, industry, market, listed_on, provenance,
+         listings [{market, listed_on, delisted_on, provenance}]
+    a listing span runs from listed_on to the day before delisted_on; a TPEx-to-TWSE move
+        gives two spans
+    listed_on is null when the listing predates the exchange's listing table
+        (before 2001-01-03 on TWSE, before 2005 on TPEx)
+    date: stocks with a span covering that day; earliest 2020-01-02
+    not PIT: refreshed in place, no available_at / recorded_at, no *_as_of parameters
+    industry is today's classification; null for delisted stocks
+
+GET /v1/trading-days?start=YYYY-MM-DD&end=YYYY-MM-DD
+    TWSE trading days with provenance; not PIT (corrected in place when the exchange
+    revises its calendar)
+
+GET /openapi.json
+    machine-readable API description
 ```
 
 Response shape (verified 2026-09-25):
@@ -96,8 +123,17 @@ derived (all derivation_version v1):
 derived_on_demand:
            technical-indicators-pit
 not in catalog:
-           historical universe / security master (listing, delisting, security type)
            adjusted prices or total-return series
+```
+
+Coverage and survivorship (verified 2026-09-26):
+
+```text
+history starts 2020-01-02 (e.g. 2330 daily prices 2020-01-02 onward)
+/v1/stocks lists delisted stocks, but datasets are still collected only for stocks
+    listed today: 2448 (delisted 2021-01-06) has no daily prices for 2020
+the universe is correct, but delisted stocks have no features or labels, so
+    survivorship bias remains until Data Center backfills them
 ```
 
 ---
@@ -283,6 +319,8 @@ Resolved:
 
 ```text
 Data Center API surface: HTTP API, see §2 "Data Center API"
+historical universe source: /v1/stocks?date=, see step-7
+trading calendar source: /v1/trading-days (reference data, not PIT)
 ```
 
 Open:
@@ -294,11 +332,15 @@ knowledge_as_of for historical cohorts (decided in step-1): history was backfill
 restatement risk in materialized derived datasets (inputs = "latest", e.g. valuation-metrics
     uses a report's latest version's facts): use a *-pit variant, request one from
     Data Center, or accept and document the risk per dataset
-historical universe source: the catalog has no security master; request a PIT universe
-    dataset from Data Center, or document an interim rule
+survivorship bias in datasets: datasets hold no history for delisted stocks; request a
+    backfill from Data Center, or document the bias and how results are reported until then
+industry classification is not PIT: /v1/stocks gives today's industry (null for delisted
+    stocks); decide whether step-10 uses sector-relative normalization in v1, and if so
+    request historical industry from Data Center
+earliest usable cohort: history starts 2020-01-02; fix the first training cohort and the
+    first evaluated cohort for walk-forward (step-16)
 adjusted prices: the catalog has no adjusted or total-return series; request one from
     Data Center, or write an ADR before adjusting from corporate-actions here
-trading calendar source
 price convention for labels and backtest (adjusted vs raw, open vs close)
 benchmark index
 model library for v1
@@ -322,7 +364,7 @@ Acceptance criteria:
   - cohort identity and playbook date
   - cutoffs are timezone-aware timestamps, never bare dates. Data Center availability is intraday (a daily price for D becomes available at 03:00 Asia/Taipei on D+1), so a date-only cutoff is ambiguous.
   - mapping to Data Center parameters: information cutoff → `information_as_of` (filters `available_at`); knowledge cutoff → `knowledge_as_of` (filters `recorded_at`)
-  - system cutoff: redefine it (e.g. code/model freeze point) or remove it. Data Center has no matching parameter.
+  - system cutoff → `system_as_of`: what Data Center had recorded, public or not. It cannot be combined with `information_as_of` / `knowledge_as_of`, so define what system cutoff means for this project (e.g. audit and debugging only, never for features) or remove it.
   - two run modes. Data Center history was backfilled in 2026, so a historical `knowledge_as_of` returns no rows.
 
     | Mode | `information_as_of` | `knowledge_as_of` | Meaning |
@@ -425,7 +467,7 @@ Acceptance criteria:
 - Estimated code: ~600 lines
 - Split reason: the full client boundary (interface, schemas, fake) is estimated at ~1000 lines.
 - Content:
-  - `DataCenterClient` protocol: one method per v1 data source (§2). Feature data methods take `PitContext`, which maps to `information_as_of` / `knowledge_as_of`. Trade-price, corporate-action, and index methods for labels/backtest take explicit dates.
+  - `DataCenterClient` protocol: one method per v1 data source (§2), plus `/v1/stocks` and `/v1/trading-days`. Feature data methods take `PitContext`, which maps to `information_as_of` / `knowledge_as_of`. Trade-price, corporate-action, and index methods for labels/backtest take explicit dates.
   - response schemas per §2 "Data Center API": `pit` block, observed rows with `recorded_at`, `available_at`, `provenance`; derived responses with the `derivation` block; nested `facts` for financial-reports
   - the `pit` block echoed by Data Center is kept in provenance; a response whose `pit.defaulted` lists a cutoff the caller supplied is rejected
   - error types: missing derivation version, PIT violation, missing provenance
@@ -479,14 +521,18 @@ Acceptance criteria:
 
 - Estimated code: ~350 lines
 - Content:
-  - `data/universe.py`: universe snapshot for a `PitContext` via Data Center PIT universe query
-  - blocked on the Phase 0 decision "historical universe source": the catalog has no security master yet
+  - `data/universe.py`: universe snapshot for a cohort from `GET /v1/stocks?date=<cohort date>`
+  - `/v1/stocks` is not PIT (refreshed in place). Listing and delisting dates are facts that do not change later, but the snapshot records the response hash and provenance, and a later rebuild that differs is reported.
+  - `industry` from `/v1/stocks` is today's classification: it is not stored as a PIT feature
   - eligibility filters as defined in step-1
+  - cohorts before 2020-01-02 fail loudly (outside Data Center coverage)
   - snapshot carries provenance and a content hash
   - defensive check: fail if Data Center returns a security listed after the cutoff
 - Tests first (permanent):
   - future listings excluded
-  - later-delisted securities remain eligible
+  - later-delisted securities remain eligible (e.g. 2448 on 2021-01-05)
+  - a stock is excluded from its delisting date on (2448 on 2021-01-06)
+  - a TPEx-to-TWSE move keeps the stock eligible across both spans
   - historical-universe drift: today's active list is never used for a historical cohort
   - provenance captured
 
@@ -586,6 +632,7 @@ Acceptance criteria:
 - Estimated code: ~400 lines
 - Content:
   - `features/transforms.py`, `features/cross_sectional.py`: rank, percentile, z-score, winsorize, universe/sector-relative normalization, missing-value handling
+  - sector-relative normalization only with a PIT industry source (Phase 0 decision "industry classification is not PIT"); today's industry from `/v1/stocks` is not used
   - deterministic tie-breaking (by security id)
   - pure functions over one cohort's panel only; never across cohorts
 - Tests first:
@@ -721,6 +768,7 @@ regression metrics if predicting raw returns
 - Estimated code: ~550 lines
 - Content:
   - schedule: expanding and explicitly documented rolling windows over target cohorts. Training sets come from step-13, with no separate embargo logic.
+  - the schedule starts no earlier than the first training cohort fixed in Phase 0 (Data Center history starts 2020-01-02)
   - metrics listed above
   - no random split in primary evaluation
 - Tests first:
