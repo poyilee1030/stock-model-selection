@@ -100,6 +100,7 @@ Write tests before implementation code, for every phase and every change:
 ### Step Rules
 
 - Each phase is delivered as one or more steps. One step = one branch (`step-N`) = one PR titled `step-N: <one-line goal>`.
+- PR titles and descriptions are written in Traditional Chinese (繁體中文). The `step-N:` prefix, code identifiers, file paths, and command output stay as-is.
 - Target size: at most 800 lines of implementation code per step, excluding tests, test fixtures, and docs.
 - If a step is estimated above 800 lines, split it into `step-N-a`, `step-N-b`, `step-N-c`, ... Each part is independently mergeable and carries its own tests.
 - An unsplit step above 800 lines is allowed only with a strong reason written in its entry as `Size exception: <reason>`.
