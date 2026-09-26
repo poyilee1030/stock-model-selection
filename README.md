@@ -11,13 +11,14 @@
 | Phase 0：時間與 cohort 契約（step-1）、資料依賴與所有權契約（step-2） | 完成 |
 | step-3：repo 骨架、基礎 CI、靜態邊界守衛 | 完成 |
 | step-4：PIT 與 cohort 領域模型（`src/stock_model_selection/domain/`） | 完成 |
-| step-5-a：Data Center client 介面與回應 schema（`src/stock_model_selection/data/`） | 完成；只有介面與 schema，還沒有會連線的 client |
+| step-5-a：Data Center client 介面與回應 schema（`src/stock_model_selection/data/`） | 完成；只有介面與 schema，會連線的 client 在 step-6 |
+| step-5-b：強制 PIT 的假 Data Center client（`data/fake_client.py`、`data/fake_store.py`） | 完成；之後的 step 以它開發與測試 |
 | 資料抓取、特徵、標籤、訓練、排名、回測 | **尚未開始**，目前沒有任何可執行的功能 |
 
 目前有作用的程式：
 
 - `src/stock_model_selection/domain/`：`PitContext`、交易日曆、`Cohort` / `LabelHorizon` 的日期計算、`DerivationRef`。只以 repo 內的交易日曆 fixture 測過，還沒有接上 Data Center。
-- `src/stock_model_selection/data/`：`DataCenterClient` protocol、資料集 registry、把 `PitContext` 對應成查詢參數的 `build_query`、回應 schema 與檢查。只以錄製的真實回應測過；實作 protocol 的假 client（step-5-b）與 HTTP adapter（step-6）還沒做。
+- `src/stock_model_selection/data/`：`DataCenterClient` protocol、資料集 registry、把 `PitContext` 對應成查詢參數的 `build_query`、回應 schema 與檢查。只以錄製的真實回應測過。假 client（`FakeDataCenter`）已實作 protocol，回答都經過同一套 parser；會連線的 HTTP adapter（step-6）還沒做。
 - `tests/guards/` 的靜態守衛。
 
 ## 開發
