@@ -11,11 +11,13 @@
 | Phase 0：時間與 cohort 契約（step-1）、資料依賴與所有權契約（step-2） | 完成 |
 | step-3：repo 骨架、基礎 CI、靜態邊界守衛 | 完成 |
 | step-4：PIT 與 cohort 領域模型（`src/stock_model_selection/domain/`） | 完成 |
+| step-5-a：Data Center client 介面與回應 schema（`src/stock_model_selection/data/`） | 完成；只有介面與 schema，還沒有會連線的 client |
 | 資料抓取、特徵、標籤、訓練、排名、回測 | **尚未開始**，目前沒有任何可執行的功能 |
 
-目前有作用的程式只有兩塊：
+目前有作用的程式：
 
 - `src/stock_model_selection/domain/`：`PitContext`、交易日曆、`Cohort` / `LabelHorizon` 的日期計算、`DerivationRef`。只以 repo 內的交易日曆 fixture 測過，還沒有接上 Data Center。
+- `src/stock_model_selection/data/`：`DataCenterClient` protocol、資料集 registry、把 `PitContext` 對應成查詢參數的 `build_query`、回應 schema 與檢查。只以錄製的真實回應測過；實作 protocol 的假 client（step-5-b）與 HTTP adapter（step-6）還沒做。
 - `tests/guards/` 的靜態守衛。
 
 ## 開發
@@ -46,6 +48,13 @@ CI（`.github/workflows/ci.yml`）在每個 PR 與 push 到 `main` 時執行上�
 - 每條規則都有刻意違規的 fixture（`tests/guards/fixtures/violations/`），以及檢查誤判的乾淨 fixture（`tests/guards/fixtures/clean/`）。
 - 守衛只解析檔案，不 import，所以 fixture 可以 import 沒有安裝的套件。
 - Data Center 的實際資料表名稱我們看不到；清單取自 `/v1/datasets` 的資料集名稱（改成 snake_case）與 derivation 的 `dataset_code`。
+
+## 工具
+
+| 指令 | 用途 |
+|---|---|
+| `uv run python scripts/record_data_center_fixtures.py` | 重新錄製 `tests/data/fixtures/responses/`（需要 `.env` 的 `STOCKDC_BASE_URL`、`STOCKDC_API_KEY`） |
+| `uv run python scripts/count_code_lines.py <路徑>` | 依 ROADMAP §4 計算實作行數 |
 
 ## 已知的環境問題
 
