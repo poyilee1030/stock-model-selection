@@ -87,7 +87,8 @@ class FakeDataCenter:
                 or r.available_at is None
                 or r.available_at <= info
             )
-            and (kind is DatasetKind.DERIVED or r.known_at <= knowledge)
+            # stored derived rows are read as of `latest`: whatever is computed by now
+            and r.known_at <= (self.now if kind is DatasetKind.DERIVED else knowledge)
         )
 
     def _selected(self, query: DatasetQuery, dataset: str) -> list[StoredRow]:
@@ -181,7 +182,7 @@ class FakeDataCenter:
             series = _latest(r for r in prices if r.keys["source"] == source)
             last = series[-1].period
             # an event adjusts nothing until a price on or after its ex-date is visible
-            events = [
+            visible = [
                 e
                 for e in self.store.events
                 if e.stock_id == stock_id
@@ -190,6 +191,11 @@ class FakeDataCenter:
                 and e.available_at <= info
                 and e.known_at <= knowledge
             ]
+            # a corrected event replaces the original: keys stock_id, source, ex_date
+            latest: dict[tuple[str, date], StoredEvent] = {}
+            for event in sorted(visible, key=lambda e: e.known_at):
+                latest[(event.row["source"], event.ex_date)] = event
+            events = list(latest.values())
             for price in series:
                 if not start <= price.period <= end:
                     continue
@@ -346,7 +352,10 @@ class FakeDataCenter:
             copy.deepcopy(dict(stock))
             for stock in self.store.stocks
             if (stock_ids is None or stock["stock_id"] in stock_ids)
-            and any(covers(s) and market in (None, s["market"]) for s in stock["listings"])
+            and (
+                (on is None and market is None)
+                or any(covers(s) and market in (None, s["market"]) for s in stock["listings"])
+            )
         ]
         return parse_stocks({"rows": rows})
 

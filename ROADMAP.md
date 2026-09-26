@@ -613,7 +613,7 @@ derivation metadata
   - 能重現 step-1 的營收延遲
 - 決議：
   - 假 client 以 `build_query` 建立請求，每個回答都經過 step-5-a 的 parser，所以與真實 API 受同一套限制與回應契約檢查。
-  - 可見規則照 Data Center：每個 key 取 `available_at <= information_as_of` 且 `recorded_at <= knowledge_as_of` 的最新一列；已儲存的衍生資料集不看 `knowledge_as_of`（`latest`）；`view=rolling` 不看 `information_as_of`，所以要求超過 P_C 前一個交易日的列會被 parser 以 PIT 違規拒絕，與真實 API 相同。
+  - 可見規則照 Data Center：每個 key 取 `available_at <= information_as_of` 且 `recorded_at <= knowledge_as_of` 的最新一列；已儲存的衍生資料集以 `latest` 讀取，只回傳在假 client 的 `now`（請求時點）之前算好的列；除權息事件同樣只取每個 key（`stock_id`、`source`、`ex_date`）的最新可見版本；`view=rolling` 不看 `information_as_of`，所以要求超過 P_C 前一個交易日的列會被 parser 以 PIT 違規拒絕，與真實 API 相同。
   - 還原權息價格照實測（2026-09-26）：事件要等到除權息日當天或之後的價格可見才開始調整；事件本身的 `available_at` 與 `recorded_at` 也要可見。事件缺 `reference_price` 或 `close_before` 時，它之前的 `adjustment_factor` 全為 null。
   - 原本列在這裡的季報 / 年報 fixture 與「Q4 時間軸」測試不做：契約 `data-dependencies.md` §6 定 v1 不直接使用 financial-reports，client 沒有對應的方法。若 D21 決定直接使用財報，同一個 step 要把 financial-reports 加進契約、client 與假 client，並補上 Q4 時間軸測試（契約 time-and-cohort §10）。
   - 公司行動只以 `adjusted-prices-pit` 的 `events` 出現（契約 §6），所以建構器產生的是事件，不是 `corporate-actions` 資料集。

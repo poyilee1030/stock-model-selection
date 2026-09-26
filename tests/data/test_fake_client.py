@@ -18,6 +18,7 @@ from stock_model_selection.data.errors import (
 )
 from stock_model_selection.data.fake_client import FakeDataCenter, Faults
 from stock_model_selection.data.fake_store import FakeStore
+from stock_model_selection.data.schemas import AdjustedPricesResponse
 from stock_model_selection.domain.calendar import TradingCalendar
 from stock_model_selection.domain.cohort import build_cohort
 from stock_model_selection.domain.errors import AuditContextError
@@ -444,3 +445,88 @@ def test_event_recorded_after_the_knowledge_cutoff_does_not_adjust() -> None:
 
     assert factor_0612(taipei(2024, 6, 19)) == Decimal(1)
     assert factor_0612(taipei(2024, 6, 21)) != Decimal(1)
+
+
+# code review: `now` is the fake's request time; nothing computed after it exists yet
+
+
+def test_stored_derived_rows_computed_after_now_are_not_answered() -> None:
+    store = FakeStore()
+    store.add_derived(
+        "valuation-metrics",
+        "2330",
+        date(2024, 7, 10),
+        {"ttm_eps": Decimal("33.06")},
+        computed_at=taipei(2026, 9, 25),
+    )
+    store.add_derived(
+        "valuation-metrics",
+        "2330",
+        date(2024, 7, 10),
+        {"ttm_eps": Decimal("30.00")},
+        computed_at=taipei(2026, 10, 1),  # a restatement after the request
+    )
+    store.add_derived(
+        "valuation-metrics",
+        "2330",
+        date(2024, 7, 9),
+        {"ttm_eps": Decimal("33.00")},
+        computed_at=taipei(2026, 10, 1),
+    )
+    response = client(store).valuation_metrics(
+        date(2024, 7, 9), date(2024, 7, 10), ["2330"], pit=RECON
+    )
+    assert [(r.period, r.values["ttm_eps"]) for r in response.rows] == [
+        (date(2024, 7, 10), Decimal("33.06"))
+    ]
+    assert all(
+        r.computed_at <= response.provenance.response_pit.knowledge_as_of for r in response.rows
+    )
+
+
+# code review: a corrected event replaces the original (keys: stock_id, source, ex_date)
+
+
+def test_corrected_event_replaces_the_original() -> None:
+    store = FakeStore()
+    for day in JUNE:
+        c = CLOSE[day]
+        store.add_daily_price("2330", day, open=c, high=c, low=c, close=c, volume=1)
+    store.add_corporate_action(
+        "2330", date(2024, 6, 13), close_before=Decimal("909.00"), reference_price=Decimal("905.00")
+    )
+    # a correction is public from when it was recorded
+    corrected = taipei(2024, 6, 14, 9)
+    store.add_corporate_action(
+        "2330",
+        date(2024, 6, 13),
+        close_before=Decimal("909.00"),
+        reference_price=Decimal("905.50"),
+        event_type="權息",
+        available_at=corrected,
+        recorded_at=corrected,
+    )
+
+    def answer(at: datetime) -> AdjustedPricesResponse:
+        pit = PitContext.production(information_as_of=at, knowledge_as_of=at)
+        return client(store).adjusted_prices_pit("2330", JUNE[0], JUNE[2], pit=pit)
+
+    before = answer(taipei(2024, 6, 14, 3))  # the 06-13 price is known, the correction is not
+    assert before.rows[1].values["adjustment_factor"] == Decimal("905.00") / Decimal("909.00")
+    after = answer(taipei(2024, 6, 14, 10))
+    assert after.rows[1].values["adjustment_factor"] == Decimal("905.50") / Decimal("909.00")
+    assert [(e.period, e.values["reference_price"]) for e in after.events] == [
+        (date(2024, 6, 13), Decimal("905.50"))
+    ]
+
+
+# code review: no filter means every stock
+
+
+def test_unfiltered_stocks_include_a_stock_without_listing_spans() -> None:
+    store = FakeStore()
+    store.add_stock("9999", "無掛牌期間", industry=None, listings=[])
+    store.add_stock("2330", "台積電", industry="半導體業", listings=[("sii", None, None)])
+    fake = client(store)
+    assert sorted(s.stock_id for s in fake.stocks().rows) == ["2330", "9999"]
+    assert [s.stock_id for s in fake.stocks(on=date(2024, 7, 11)).rows] == ["2330"]
