@@ -521,10 +521,11 @@ derivation metadata
     - 禁止的 import：PostgreSQL driver、SQLAlchemy、Redis client、`stock-eps-model` 套件 / client
     - 原始 SQL 語句樣式與 Data Center 資料表名稱
 - 測試先行：每個守衛都拿刻意違規的 fixture 檔案測試，必須在這些檔案上失敗。
+- 決議：Python 3.12、uv 管理環境與 lockfile、LightGBM 等執行期依賴留到用到的 step 才加入；守衛放在 `tests/guards/`（測試程式，不隨套件發佈）；Data Center 資料表名稱取自資料集名稱與 `dataset_code`，只在 SQL 位置比對。
 - 驗收：
-  - [ ] 不存取 DB/Redis
-  - [ ] 不依賴 stock-eps-model
-  - [ ] 骨架上 CI 全綠
+  - [x] 不存取 DB/Redis
+  - [x] 不依賴 stock-eps-model
+  - [x] 骨架上 CI 全綠
 
 ## step-4: PIT 與 cohort 領域模型
 
