@@ -1,0 +1,6 @@
+[project]
+name = "violating"
+version = "0"
+
+[tool.uv]
+dev-dependencies = ["asyncpg"]

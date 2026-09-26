@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.guards.boundary import Violation, scan_pyproject, scan_python
+from tests.guards.boundary import Violation, scan_lockfile, scan_pyproject, scan_python
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -23,6 +23,11 @@ def found(violations: list[Violation]) -> set[tuple[int, str]]:
         ("import_dynamic.py", {(3, "forbidden-import"), (4, "forbidden-import")}),
         ("raw_sql.py", {(1, "raw-sql"), (5, "raw-sql")}),
         ("table_name.py", {(2, "data-center-table")}),
+        ("raw_sql_split.py", {(2, "raw-sql"), (5, "raw-sql"), (6, "raw-sql")}),
+        (
+            "import_redis_parser.py",
+            {(1, "forbidden-import"), (2, "forbidden-import"), (3, "forbidden-import")},
+        ),
     ],
 )
 def test_python_guard_flags_each_violation(fixture: str, expected: set[tuple[int, str]]) -> None:
@@ -35,9 +40,21 @@ def test_pyproject_guard_flags_forbidden_distributions() -> None:
     assert sorted(v.detail for v in violations) == ["psycopg2-binary", "redis", "stock-eps-model"]
 
 
+def test_pyproject_guard_reads_legacy_uv_dev_dependencies() -> None:
+    violations = scan_pyproject(VIOLATIONS / "pyproject_uv_dev.toml")
+    assert [(v.rule, v.detail) for v in violations] == [("forbidden-dependency", "asyncpg")]
+
+
+def test_lockfile_guard_flags_forbidden_packages() -> None:
+    violations = scan_lockfile(VIOLATIONS / "uv.lock")
+    assert [(v.rule, v.detail) for v in violations] == [("forbidden-dependency", "sqlalchemy")]
+
+
 def test_clean_fixtures_have_no_false_positives() -> None:
     assert scan_python(FIXTURES / "clean" / "allowed.py") == []
+    assert scan_python(FIXTURES / "clean" / "english.py") == []
     assert scan_pyproject(FIXTURES / "clean" / "pyproject.toml") == []
+    assert scan_lockfile(FIXTURES / "clean" / "uv.lock") == []
 
 
 def test_repository_source_respects_boundaries() -> None:
@@ -45,4 +62,5 @@ def test_repository_source_respects_boundaries() -> None:
     assert sources, "src/ has no Python files to scan"
     violations = [v for path in sources for v in scan_python(path)]
     violations += scan_pyproject(ROOT / "pyproject.toml")
+    violations += scan_lockfile(ROOT / "uv.lock")
     assert violations == []

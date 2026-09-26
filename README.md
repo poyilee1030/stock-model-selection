@@ -30,13 +30,13 @@ CI（`.github/workflows/ci.yml`）在每個 PR 與 push 到 `main` 時執行上�
 
 ## 靜態邊界守衛
 
-`tests/guards/test_boundary.py` 掃描 `src/` 與 `pyproject.toml`，發現以下任一項就失敗：
+`tests/guards/test_boundary.py` 掃描 `src/`、`pyproject.toml` 與 `uv.lock`，發現以下任一項就失敗：
 
 | 規則 | 抓什麼 |
 |---|---|
-| `forbidden-import` | import PostgreSQL driver（psycopg、psycopg2、asyncpg、pg8000）、SQLAlchemy / SQLModel、Redis client、`stock_eps_model`；包括 `importlib.import_module("...")` 與 `__import__("...")` |
-| `forbidden-dependency` | `pyproject.toml` 的 dependencies、optional-dependencies、dependency-groups 裡出現上述套件 |
-| `raw-sql` | 字串中出現 SQL 語句（`SELECT … FROM`、`INSERT INTO`、`UPDATE … SET`、`DELETE FROM`、`CREATE/DROP/ALTER/TRUNCATE TABLE`）；docstring 不檢查 |
+| `forbidden-import` | import PostgreSQL driver（psycopg 及其 `psycopg_c`、`psycopg_binary`、`psycopg_pool`，psycopg2、asyncpg、pg8000）、SQLAlchemy / SQLModel、Redis client（redis、aioredis、hiredis）、`stock_eps_model`；包括 `importlib.import_module("...")` 與 `__import__("...")` |
+| `forbidden-dependency` | 上述套件出現在 `pyproject.toml` 的 dependencies、optional-dependencies、dependency-groups、`[tool.uv] dev-dependencies`，或出現在 `uv.lock`（間接依賴） |
+| `raw-sql` | 字串中出現 SQL 語句（`SELECT … FROM`、`INSERT INTO`、`UPDATE … SET`、`DELETE FROM`、`CREATE/DROP/ALTER/TRUNCATE TABLE`）。全大寫的關鍵字一律算；其他大小寫要有語句結構才算，所以 `"Select a model from the registry"` 這類英文不會誤判。f-string 與字串相加會先組合再檢查；docstring 不檢查 |
 | `data-center-table` | 字串中在 SQL 位置（`FROM`、`JOIN`、`INTO`、`UPDATE`、`TABLE` 之後）出現 Data Center 的資料表名稱，例如 `daily_prices` |
 
 - 每條規則都有刻意違規的 fixture（`tests/guards/fixtures/violations/`），以及檢查誤判的乾淨 fixture（`tests/guards/fixtures/clean/`）。
