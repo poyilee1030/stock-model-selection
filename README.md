@@ -10,9 +10,13 @@
 |---|---|
 | Phase 0：時間與 cohort 契約（step-1）、資料依賴與所有權契約（step-2） | 完成 |
 | step-3：repo 骨架、基礎 CI、靜態邊界守衛 | 完成 |
+| step-4：PIT 與 cohort 領域模型（`src/stock_model_selection/domain/`） | 完成 |
 | 資料抓取、特徵、標籤、訓練、排名、回測 | **尚未開始**，目前沒有任何可執行的功能 |
 
-目前 `src/stock_model_selection/` 只有空的套件骨架。唯一有作用的程式是 `tests/guards/` 的靜態守衛。
+目前有作用的程式只有兩塊：
+
+- `src/stock_model_selection/domain/`：`PitContext`、交易日曆、`Cohort` / `LabelHorizon` 的日期計算、`DerivationRef`。只以 repo 內的交易日曆 fixture 測過，還沒有接上 Data Center。
+- `tests/guards/` 的靜態守衛。
 
 ## 開發
 
