@@ -250,11 +250,12 @@ K 早於 C
 
 ## 11. 不在本文件範圍內
 
-以下於 step-2 決定：
+以下已於 step-2 決定：
 
-- 各資料集必須達到的 PIT 層級
-- 股票池的資料來源細節
-- 價格慣例：還原或原始、開盤或收盤，以及讀取標籤時的 PIT 情境
+- 各資料集必須達到的 PIT 層級：[`data-dependencies.md`](data-dependencies.md)
+- 股票池的資料來源細節：[`data-dependencies.md`](data-dependencies.md) §2、§3
+- 價格慣例：還原價格、P_C 開盤進場、X_C 收盤出場，以 `information_as_of = label_available_at` 讀取：[`../decisions.md`](../decisions.md) D12
+- 入選篩選（EPS、成交量）不影響股票池，只影響能否入選：[`ranking.md`](ranking.md)
 
 ---
 
