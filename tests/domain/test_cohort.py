@@ -35,10 +35,19 @@ def test_month_parses_and_prints_yyyy_mm() -> None:
     assert Month.parse("2024-07") == Month(2024, 7)
 
 
-@pytest.mark.parametrize("text", ["2024-7", "2024-13", "2024-00", "202407", "2024-07-01", ""])
+@pytest.mark.parametrize(
+    "text", ["2024-7", "2024-13", "2024-00", "0000-07", "202407", "2024-07-01", ""]
+)
 def test_malformed_cohort_id_is_rejected(text: str) -> None:
     with pytest.raises(InvalidCohortError):
         Month.parse(text)
+
+
+def test_month_outside_the_date_range_is_a_domain_error() -> None:
+    with pytest.raises(InvalidCohortError):
+        Month(0, 7)
+    with pytest.raises(InvalidCohortError):
+        Month(9999, 12).next()
 
 
 def test_month_arithmetic_crosses_years() -> None:

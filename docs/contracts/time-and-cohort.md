@@ -107,6 +107,7 @@ playbook date P_M  D_M 之後的第一個交易日（嚴格晚於 D_M）
   - 例如 `valuation-metrics`、`technical-indicators`。傳入明確時間戳會回 400，即使那個時間戳就是一分鐘前。
   - 使用這類資料集時，兩種模式都傳 `latest`。
   - 同時在 provenance 記錄回應中的 `pit` 區塊與每列的 `computed_at`，並把回傳列納入資料集雜湊。
+  - `PitContext` 仍是 cohort 的明確時間戳，不改成 `latest`；provenance 紀錄以 `knowledge = latest` 註明實際送出的是 `latest`（step-4 的 `ProvenanceRecord`）。只有衍生資料集可以這樣記錄。
   - 這類資料集重跑時不保證得到相同數值，這是已知限制。
 - observed 資料集與即時計算的 `*-pit` 資料集接受明確的 `knowledge_as_of`。在重建模式下，同一個 t_recon 可以重現相同結果，前提是 Data Center 不刪除紀錄。
 

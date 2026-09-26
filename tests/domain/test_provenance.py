@@ -10,7 +10,11 @@ from stock_model_selection.domain.errors import (
     MissingDerivationVersionError,
 )
 from stock_model_selection.domain.pit import PitContext
-from stock_model_selection.domain.provenance import DerivationRef, ProvenanceRecord
+from stock_model_selection.domain.provenance import (
+    DerivationRef,
+    KnowledgeQuery,
+    ProvenanceRecord,
+)
 from stock_model_selection.domain.time import TAIPEI
 
 T_C = datetime(2024, 7, 11, 4, 0, tzinfo=TAIPEI)
@@ -47,24 +51,84 @@ def test_derivation_version_is_compared_exactly() -> None:
 def test_provenance_record_for_derived_dataset() -> None:
     pit = PitContext.reconstruction(information_as_of=T_C, knowledge_as_of=LATER)
     ref = DerivationRef("valuation_metrics", "v1")
-    record = ProvenanceRecord(dataset="valuation-metrics", pit=pit, derivation=ref)
+    record = ProvenanceRecord(
+        dataset="valuation-metrics", pit=pit, derivation=ref, knowledge=KnowledgeQuery.LATEST
+    )
     assert record.pit is pit
     assert record.derivation == ref
+    assert record.knowledge is KnowledgeQuery.LATEST
 
 
 def test_provenance_record_for_observed_dataset_has_no_derivation() -> None:
     pit = PitContext.reconstruction(information_as_of=T_C, knowledge_as_of=LATER)
-    record = ProvenanceRecord(dataset="daily-prices", pit=pit, derivation=None)
+    record = ProvenanceRecord(
+        dataset="daily-prices", pit=pit, derivation=None, knowledge=KnowledgeQuery.EXPLICIT
+    )
     assert record.derivation is None
 
 
 @pytest.mark.parametrize("pit", [None, date(2024, 7, 11), T_C])
 def test_provenance_record_requires_a_pit_context(pit: object) -> None:
     with pytest.raises(InvalidCutoffError):
-        ProvenanceRecord(dataset="daily-prices", pit=cast(Any, pit), derivation=None)
+        ProvenanceRecord(
+            dataset="daily-prices",
+            pit=cast(Any, pit),
+            derivation=None,
+            knowledge=KnowledgeQuery.EXPLICIT,
+        )
 
 
 def test_provenance_record_requires_a_dataset_name() -> None:
     pit = PitContext.reconstruction(information_as_of=T_C, knowledge_as_of=LATER)
     with pytest.raises(ValueError):
-        ProvenanceRecord(dataset="", pit=pit, derivation=None)
+        ProvenanceRecord(dataset="", pit=pit, derivation=None, knowledge=KnowledgeQuery.EXPLICIT)
+
+
+# stored derived datasets only accept knowledge_as_of=latest (time-and-cohort §5);
+# the PitContext stays explicit, the record says what was actually sent
+
+
+def test_provenance_record_must_say_how_knowledge_was_queried() -> None:
+    pit = PitContext.reconstruction(information_as_of=T_C, knowledge_as_of=LATER)
+    with pytest.raises(TypeError):
+        ProvenanceRecord(**cast(Any, {"dataset": "daily-prices", "pit": pit, "derivation": None}))
+
+
+def test_latest_knowledge_is_only_for_derived_datasets() -> None:
+    pit = PitContext.reconstruction(information_as_of=T_C, knowledge_as_of=LATER)
+    with pytest.raises(ValueError):
+        ProvenanceRecord(
+            dataset="daily-prices", pit=pit, derivation=None, knowledge=KnowledgeQuery.LATEST
+        )
+
+
+def test_latest_knowledge_needs_a_market_context() -> None:
+    audit = PitContext.audit(system_as_of=LATER)
+    with pytest.raises(ValueError):
+        ProvenanceRecord(
+            dataset="valuation-metrics",
+            pit=audit,
+            derivation=DerivationRef("valuation_metrics", "v1"),
+            knowledge=KnowledgeQuery.LATEST,
+        )
+
+
+@pytest.mark.parametrize("knowledge", ["latest", None])
+def test_knowledge_query_must_be_the_enum(knowledge: object) -> None:
+    pit = PitContext.reconstruction(information_as_of=T_C, knowledge_as_of=LATER)
+    with pytest.raises(ValueError):
+        ProvenanceRecord(
+            dataset="daily-prices", pit=pit, derivation=None, knowledge=cast(Any, knowledge)
+        )
+
+
+@pytest.mark.parametrize("derivation", ["v1", ("valuation_metrics", ""), {"version": "v1"}])
+def test_provenance_derivation_must_be_a_derivation_ref(derivation: object) -> None:
+    pit = PitContext.reconstruction(information_as_of=T_C, knowledge_as_of=LATER)
+    with pytest.raises(MissingDerivationVersionError):
+        ProvenanceRecord(
+            dataset="valuation-metrics",
+            pit=pit,
+            derivation=cast(Any, derivation),
+            knowledge=KnowledgeQuery.EXPLICIT,
+        )

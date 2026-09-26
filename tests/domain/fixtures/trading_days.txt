@@ -1,5 +1,6 @@
 # TWSE trading days from Data Center GET /v1/trading-days?start=2019-01-01&end=2026-12-31
-# fetched 2026-09-26; coverage is the first to the last row (the API has no future dates)
+# fetched 2026-09-26; returned 2020-01-02 (Data Center's first day) to 2026-09-15
+# coverage is the first to the last row (the API has no future dates)
 # one date per line; lines starting with # are comments
 2020-01-02
 2020-01-03

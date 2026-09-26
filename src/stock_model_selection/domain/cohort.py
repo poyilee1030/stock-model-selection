@@ -7,7 +7,7 @@ through the next cohort's playbook date, which the decision itself never waits f
 
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import MAXYEAR, MINYEAR, date, datetime, timedelta
 
 from stock_model_selection.domain.calendar import TradingCalendar
 from stock_model_selection.domain.errors import CutoffOrderError, InvalidCohortError
@@ -32,7 +32,7 @@ class Month:
     month: int
 
     def __post_init__(self) -> None:
-        if not 1 <= self.month <= 12:
+        if not (MINYEAR <= self.year <= MAXYEAR and 1 <= self.month <= 12):
             raise InvalidCohortError(f"month out of range: {self.year}-{self.month}")
 
     @classmethod

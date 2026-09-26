@@ -548,6 +548,7 @@ derivation metadata
   - 測試用 repo 內的交易日曆 fixture（`tests/domain/fixtures/trading_days.txt`，2026-09-26 從 Data Center 取得，2020-01-02 到 2026-09-15），CI 不連網。
   - production 的 `knowledge_as_of`（執行時點）必須落在 T_C ≤ t_run < P_C 09:00 開盤（契約 §5）；由 `Cohort.production_context` 檢查。
   - 特徵與標籤 API 以 `require_market_pit` 作為入口檢查：`None`、日期、時間戳、audit 模式一律拒絕。
+  - 已儲存的衍生資料集只接受 `knowledge_as_of=latest`（實測送明確時間戳回 400）：`PitContext` 保持明確時間戳，`ProvenanceRecord.knowledge`（`explicit` / `latest`）記錄實際送出的值；`latest` 只允許用在衍生資料集（code review 修正）。
   - §12 的不變條件 7 在 step-13、8 在 step-7 實作並測試（兩者原本就在那兩個 step 的測試清單中）。
   - 契約 §7 的標籤期間長度更正為 12–23 個交易日（原寫約 19–23）；80 個 cohort 中 10 個較短，都是農曆年或連假所在的月份。
 - 驗收：
