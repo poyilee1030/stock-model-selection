@@ -109,6 +109,13 @@ financial-reports 列：巢狀 facts [{statement, account_code, concept, period_
 ```text
 information_as_of 以 available_at 過濾列
     例：2330 在 2024-07-02 的日價格 available_at 為 2024-07-02T19:00Z（台北時間 D+1 03:00）
+各資料集的 available_at 規則（2026-09-26 實測，完整表見 docs/contracts/time-and-cohort.md）：
+    日頻資料（日價格、法人、融資券、借券、官方評價、外資持股、指數）：D+1 03:00
+    集保股權分散：快照日後的週日 12:00
+    月營收：公布日 23:59:59
+    公司行動：除權息日 00:00
+    財報：2025 Q3（含）以前每季所有股票共用同一個保守日期（法定期限當天或之後
+        第一個工作日 23:59:59）；2025 Q4 起為各股實際公布時間
 knowledge_as_of 以 recorded_at 過濾列
     歷史資料是 2026 年回補的，所以歷史時點的 knowledge_as_of 回傳 0 列
 實體化（materialized）衍生資料集回報 inputs = "latest"：數值由最新版的輸入計算，
@@ -376,14 +383,20 @@ Data Center API 介面：HTTP API，見 §2「Data Center API」
 交易日曆來源：/v1/trading-days（參考資料，不是 PIT）
 還原權息價格：Data Center adjusted-prices-pit（向後調整、含息、PIT）；不要在本專案
     從 corporate-actions 自行調整
+cohort 與時間語意（step-1）：月度 cohort；playbook date = 營收截止日（每月 10 日，
+    非交易日順延）後的第一個交易日；資訊截止點 = playbook date 04:00 台北時間；
+    出場日 = 下一個 cohort 進場日的前一個交易日；見 docs/contracts/time-and-cohort.md
+歷史 cohort 的 knowledge_as_of（step-1）：兩種模式的 information_as_of 都是 cohort 的
+    資訊截止點；production 的 knowledge_as_of 為執行時點，reconstruction 為記錄在
+    artifact 中的明確重建時點；已儲存的衍生資料集只能用 latest
+系統截止點（step-1）：只用於稽核與除錯，特徵、標籤、訓練、排名、回測都不得使用
+營收未公布的股票（step-1）：M-1 月營收在 cohort 資訊截止點不可見的股票，當月不列入
+    股票池；不維護主管機關延長期限的例外表
 ```
 
 待決：
 
 ```text
-歷史 cohort 的 knowledge_as_of（於 step-1 決定）：歷史資料是 2026 年回補的，
-    所以歷史時點的 knowledge_as_of 什麼都回不來；定義正式執行與歷史重建
-    各使用哪個知識截止點
 實體化衍生資料集的重編風險（inputs = "latest"，例如 valuation-metrics 使用
     財報最新版本的數值）：改用 *-pit 版本、向 Data Center 申請一個，
     或逐資料集接受並記錄此風險
@@ -427,7 +440,7 @@ artifact 儲存位置與格式
 
     | 模式 | `information_as_of` | `knowledge_as_of` | 意義 |
     |---|---|---|---|
-    | production（正式） | 執行時間 | 執行時間 | 真正的 PIT |
+    | production（正式） | 該 cohort 的資訊截止點 | 執行時間 | 真正的 PIT |
     | reconstruction（重建） | 該 cohort 的資訊截止點 | 重建時間 | 當時已公開的資料，以現在的紀錄為準 |
 
     重建模式會看到 cohort 截止點之後才記錄的更正；把這點列為已知限制，並將兩種模式對應到排名 artifact 的種類（`production` / `reconstruction`，step-19）。
@@ -443,14 +456,15 @@ artifact 儲存位置與格式
     - 季報（2330 的 2024 Q1：2024-05-15 23:59 台北時間），以及 2–3 月公布的 Q4 年報
 - 不在範圍內、於 step-2 決定：各資料集必須達到的 PIT 層級、股票池資料來源、價格慣例（還原或原始、開盤或收盤）。
 - 測試先行：不適用（僅文件）。這裡寫下的不變條件會成為 step-4 最先失敗的測試。
+- 決議：production 模式的 `information_as_of` 改為 cohort 的資訊截止點（原為執行時間），讓兩種模式只差在 `knowledge_as_of`；詳見契約 §5。
 - 驗收：
-  - [ ] 明確指出進場日不是資訊截止點
-  - [ ] 每個截止點都是帶時區的時間戳
-  - [ ] 每個截止點都對應到一個 Data Center 參數，或說明沒有對應參數時的意義
-  - [ ] 定義正式與重建兩種模式，並寫明重建模式的限制
-  - [ ] 定義列層級與值層級 PIT
-  - [ ] 寫明目標 cohort 的排除規則（自己的列、之後的 cohort、標籤尚未完整的較早 cohort）
-  - [ ] 以出場價格的 `available_at` 定義 `label_available_at`
+  - [x] 明確指出進場日不是資訊截止點
+  - [x] 每個截止點都是帶時區的時間戳
+  - [x] 每個截止點都對應到一個 Data Center 參數，或說明沒有對應參數時的意義
+  - [x] 定義正式與重建兩種模式，並寫明重建模式的限制
+  - [x] 定義列層級與值層級 PIT
+  - [x] 寫明目標 cohort 的排除規則（自己的列、之後的 cohort、標籤尚未完整的較早 cohort）
+  - [x] 以出場價格的 `available_at` 定義 `label_available_at`
 
 ## step-2: 資料依賴、所有權與 artifact 契約
 
@@ -519,6 +533,7 @@ derivation metadata
   - 從 `entry_date` 建立 `PitContext` 時拋出例外
   - 截止點順序違規時拋出例外
   - 沒有版本的 `DerivationRef` 拋出例外
+  - `docs/contracts/time-and-cohort.md` §12 列出的不變條件，包括 playbook date、出場日與 `label_available_at` 的日曆計算
 
 ## step-5-a: Data Center client 介面與回應 schema
 
@@ -582,7 +597,7 @@ derivation metadata
   - `data/universe.py`：以 `GET /v1/stocks?date=<cohort 日期>` 產生某個 cohort 的股票池快照
   - `/v1/stocks` 不是 PIT（原地更新）。掛牌與下市日期是事後不會改變的事實，但快照仍記錄回應雜湊與 provenance，之後重建若有差異會被回報。
   - `/v1/stocks` 的 `industry` 是今日分類：不當作 PIT 特徵儲存
-  - 資格過濾依 step-1 的定義
+  - 資格過濾依 step-1 契約 §8：掛牌期間涵蓋 playbook date、M-1 月營收在資訊截止點可見、playbook date 前一個交易日有成交
   - 2020-01-02 之前的 cohort 明確失敗（超出 Data Center 涵蓋範圍）
   - 快照帶 provenance 與內容雜湊
   - 防禦性檢查：若 Data Center 回傳截止點之後才掛牌的股票，則失敗
@@ -592,6 +607,7 @@ derivation metadata
   - 之後才下市的股票仍具資格（例：2448 在 2021-01-05）
   - 股票從下市日起被排除（2448 在 2021-01-06）
   - 上櫃轉上市的股票在兩段掛牌期間都保有資格
+  - M-1 月營收在資訊截止點不可見的股票被排除（例：2024-07 cohort 排除 8 檔 2024-06 營收未公布的股票）
   - 歷史股票池漂移：歷史 cohort 絕不使用今日的上市櫃清單
   - 記錄 provenance
 
@@ -750,6 +766,8 @@ label_available_at
   - C 本身
   - 所有之後的 cohort
   - `label_available_at` 晚於 C 截止點的較早 cohort（依 step-1 定義）
+  - 標籤所需價格在 C 的 PIT 情境下查不到的 cohort（production 模式下資料擷取落後）
+  - 依 step-1 的日曆，最近可訓練的是 C-1
 - 測試先行（永久保留）：
   - 目標 cohort 自我訓練
   - 未完整的未來報酬標籤
