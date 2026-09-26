@@ -28,6 +28,7 @@ institutional/chip-flow source data
 margin/SBL
 market indices
 corporate actions
+adjusted prices (adjusted-prices-pit)
 official valuation
 canonical derived datasets
 ```
@@ -62,6 +63,7 @@ GET /v1/datasets/{name}?start=YYYY-MM-DD&end=YYYY-MM-DD[&stock_id=2330&stock_id=
     stored derived datasets accept only knowledge_as_of = latest
     other parameters: source (repeatable), statement / account_code (financial-reports),
         view = as_of | rolling (technical-indicators-pit)
+    adjusted-prices-pit and technical-indicators-pit: exactly one stock_id per request
 
 GET /v1/stocks[?stock_id=2330][&market=sii|otc][&date=YYYY-MM-DD]
     common stocks on TWSE (sii) and TPEx (otc): every stock on today's list plus every one
@@ -94,6 +96,12 @@ derived:        top-level derivation {dataset_code, derivation_version, ...}, in
 derived_on_demand (technical-indicators-pit):
                 top-level view ("as_of" | "rolling"), rows carry information_as_of,
                 input_count, input_fingerprint
+adjusted-prices-pit:
+                top-level events [{ex_date, event_type, close_before, reference_price,
+                factor, available_at, recorded_at, provenance, ...}] for every event
+                that adjusts a returned row; rows carry raw open/high/low/close_price,
+                adjustment_factor, adjusted_open/high/low/close_price, and no
+                available_at / recorded_at
 financial-reports rows: nested facts [{statement, account_code, concept, period_start,
                 period_end, unit, value}]
 errors:         HTTP 400 with {"detail": "..."}
@@ -109,9 +117,35 @@ knowledge_as_of filters rows by recorded_at
 materialized derived datasets report inputs = "latest": values are computed from the latest
     input versions; only rows are filtered by available_at
 technical-indicators-pit computes indicators under full PIT on demand
+adjusted-prices-pit computes adjustment factors under full PIT on demand (market or system PIT)
 ```
 
-Catalog on 2026-09-25:
+Adjusted prices (adjusted-prices-pit, verified 2026-09-26):
+
+```text
+backward, total-return: factor of an event = reference_price / close_before; a trade date's
+    adjustment_factor is the product of the factors of the visible events after it, up to
+    the last price the PIT context sees; that last price is unadjusted
+the exchange reference price already deducts cash dividends, so returns from the adjusted
+    series are total returns (dividends reinvested); a price-only series is not offered
+volume is not adjusted
+event visibility: corporate_action_ex_date@1 (00:00 Asia/Taipei on the ex-date);
+    price visibility: exchange_daily_settled@1 (03:00 Asia/Taipei on D+1)
+    e.g. 2330 as of 2024-06-15: the 2024-06-13 ex-dividend (factor 0.99615) adjusts
+    2024-06-12 and earlier; the 2024-09-12 ex-dividend is not yet visible
+covers ex-right / ex-dividend, cash capital reduction, capital reduction to offset losses,
+    and par-value change (e.g. 2327 par change 2025-08-25: factor 0.25)
+one series per source: a TPEx-to-TWSE move gives two series; name the source
+an event without reference_price or close_before leaves every earlier adjustment_factor null
+days without a trade are returned with null prices (e.g. 8291 2025-08-12)
+on a cash capital increase's ex-date the adjusted close can move by more than 10%:
+    the subscription right's value, as the reference price models it
+reference prices are rounded to the tick, so the adjusted return on an ex-date differs
+    slightly from (close + dividend) / previous close - 1 (2330 2024-06-13: 1.4909% vs 1.4851%)
+full history of one stock (2330, 2020-01-02 onward, 1627 rows) returns in about 0.2 s
+```
+
+Catalog on 2026-09-26:
 
 ```text
 observed:  daily-prices, indices, official-valuations, institutional-flows,
@@ -121,9 +155,7 @@ derived (all derivation_version v1):
            technical-indicators, institutional-streaks, institutional-cumulative-flows,
            shareholding-concentrations, margin-metrics, short-interest-metrics, valuation-metrics
 derived_on_demand:
-           technical-indicators-pit
-not in catalog:
-           adjusted prices or total-return series
+           technical-indicators-pit, adjusted-prices-pit
 ```
 
 Coverage and survivorship (verified 2026-09-26):
@@ -321,6 +353,8 @@ Resolved:
 Data Center API surface: HTTP API, see §2 "Data Center API"
 historical universe source: /v1/stocks?date=, see step-7
 trading calendar source: /v1/trading-days (reference data, not PIT)
+adjusted prices: Data Center adjusted-prices-pit (backward, total-return, PIT); do not
+    adjust from corporate-actions here
 ```
 
 Open:
@@ -339,9 +373,10 @@ industry classification is not PIT: /v1/stocks gives today's industry (null for 
     request historical industry from Data Center
 earliest usable cohort: history starts 2020-01-02; fix the first training cohort and the
     first evaluated cohort for walk-forward (step-16)
-adjusted prices: the catalog has no adjusted or total-return series; request one from
-    Data Center, or write an ADR before adjusting from corporate-actions here
-price convention for labels and backtest (adjusted vs raw, open vs close)
+price convention for labels and backtest: adjusted-prices-pit total return vs raw,
+    open vs close, and the PIT context labels are read under (label_available_at or latest;
+    events after the exit rescale entry and exit equally, so only later corrections of
+    prices or events change the ratio)
 benchmark index
 model library for v1
 artifact storage location and format
@@ -467,7 +502,7 @@ Acceptance criteria:
 - Estimated code: ~600 lines
 - Split reason: the full client boundary (interface, schemas, fake) is estimated at ~1000 lines.
 - Content:
-  - `DataCenterClient` protocol: one method per v1 data source (§2), plus `/v1/stocks` and `/v1/trading-days`. Feature data methods take `PitContext`, which maps to `information_as_of` / `knowledge_as_of`. Trade-price, corporate-action, and index methods for labels/backtest take explicit dates.
+  - `DataCenterClient` protocol: one method per v1 data source (§2), plus `/v1/stocks` and `/v1/trading-days`. Feature data methods take `PitContext`, which maps to `information_as_of` / `knowledge_as_of`. Trade-price, corporate-action, and index methods for labels/backtest take explicit dates; the adjusted-price method (`adjusted-prices-pit`, one stock per call) also takes an explicit `information_as_of` and keeps the `events` block.
   - response schemas per §2 "Data Center API": `pit` block, observed rows with `recorded_at`, `available_at`, `provenance`; derived responses with the `derivation` block; nested `facts` for financial-reports
   - the `pit` block echoed by Data Center is kept in provenance; a response whose `pit.defaulted` lists a cutoff the caller supplied is rejected
   - error types: missing derivation version, PIT violation, missing provenance
@@ -481,7 +516,7 @@ Acceptance criteria:
 - Estimated code: ~400 lines
 - Content:
   - in-memory fixture store. Every row has an availability timestamp, and the fake returns only rows visible at the knowledge cutoff. Without this, leakage tests cannot detect anything.
-  - fixture builders: listings/delistings, monthly revenue with publication lag, quarterly/annual financials with late publication, prices, corporate actions
+  - fixture builders: listings/delistings, monthly revenue with publication lag, quarterly/annual financials with late publication, prices, corporate actions, adjusted prices whose factors change as events become visible
   - fault injection: wrong derivation version, missing provenance
 - Tests first:
   - rows published after the cutoff are hidden
@@ -673,12 +708,14 @@ Target cohort must never train itself.
 - Estimated code: ~450 lines
 - Content:
   - `LabelSpec`: horizon, price convention (from step-2), `label_available_at`
-  - corporate actions handled from Data Center data (use Data Center adjusted prices if canonical; do not reimplement). The catalog has no adjusted series yet; see the Phase 0 decision "adjusted prices".
+  - corporate actions handled by Data Center `adjusted-prices-pit` (backward, total-return); do not reimplement adjustment from `corporate-actions`
+  - returns are ratios of adjusted prices read under one PIT context, so later events rescale both ends equally; a null `adjustment_factor` or null price at entry or exit makes the label missing, not zero
   - explicit policy for suspension/delisting within the horizon
   - labels are a distinct type in `labels/` and cannot be passed into the feature builder
 - Tests first:
   - known-value returns
-  - corporate action applied
+  - corporate action applied: ex-dividend inside the horizon gives the total return (2330 across 2024-06-13), par-value change is neutral (2327 across 2025-08-25)
+  - null price or null `adjustment_factor` at entry or exit gives a missing label
   - `label_available_at` computed per contract
   - delisting-within-horizon policy
 
@@ -882,7 +919,7 @@ apply month-specific leakage workarounds
 - Estimated code: ~550 lines
 - Content:
   - load a ranking artifact and verify its hash
-  - portfolio construction, with entry/exit prices and corporate actions from Data Center
+  - portfolio construction, with entry/exit prices from Data Center; returns from `adjusted-prices-pit` (total return), under the price convention decided in step-2
   - suspension/delisting handling; cost model
   - import-boundary guard: `backtest/` must not import `features/`, `training/`, or the dataset builder
 - Tests first:
