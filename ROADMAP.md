@@ -101,7 +101,22 @@ adjusted-prices-pit：
                 adjusted_open/high/low/close_price，沒有 available_at / recorded_at
 financial-reports 列：巢狀 facts [{statement, account_code, concept, period_start,
                 period_end, unit, value}]
-錯誤：          HTTP 400，內容 {"detail": "..."}
+錯誤：          HTTP 400，內容 {"detail": "..."}；沒有有效 API key 為 401；未知資料集為 404
+```
+
+回應細節（2026-09-26 錄製，見 `tests/data/fixtures/responses/`）：
+
+```text
+小數是帶原始位數的 JSON 數字（例：1040.000000），必須讀成 Decimal，不能經過 float
+pit.mode 為 "market"；時間戳帶時區位移，列的時間戳為 UTC（+00:00）
+已儲存的衍生資料集：pit.aliases = {"knowledge_as_of": "latest"}，pit.knowledge_as_of 是
+    實際採用的時點
+technical-indicators-pit（view=rolling）：不接受 information_as_of（400）；
+    pit.information_as_of 是文字 "each date's own release instant"，並列在 pit.defaulted
+derived_on_demand 的 derivation 區塊另有 git_commit
+/v1/stocks：下市股票的 market 與 industry 為 null，市場只記在各段 listings
+請求限制實測：不帶 stock_id 時 31 天（含頭尾）可以、32 天回 400；200 個 stock_id 可以、
+    201 個回 400；adjusted-prices-pit 帶兩個 stock_id 回 400
 ```
 
 已驗證的 PIT 語意（2026-09-25 驗證）：
@@ -265,6 +280,7 @@ canonical Data Center 依賴必須記錄 derivation_version
 - 每個 phase 以一個或多個 step 交付。一個 step = 一個 branch（`step-N`）= 一個 PR，標題為 `step-N: <一行目標>`。
 - PR 標題與描述使用繁體中文撰寫。`step-N:` 前綴、程式識別字、檔案路徑、指令輸出保持原樣。
 - 目標大小：每個 step 最多 800 行實作程式碼，不含測試、測試 fixture 與文件。
+- 行數只算程式碼行：不含空行、只有註解的行與 docstring，以 `uv run python scripts/count_code_lines.py <路徑>` 計算（2026-09-26 決定，step-5-a 起適用）。`scripts/` 下錄製測試 fixture 與量測用的工具，與測試 fixture 同樣不算。
 - 預估超過 800 行的 step，拆成 `step-N-a`、`step-N-b`、`step-N-c`……每一部分都能獨立合併，並帶有自己的測試。
 - 未拆分且超過 800 行的 step，只有在其條目中寫明 `Size exception: <理由>` 且理由充分時才允許。
 - 本 roadmap 中的預估是規劃數字。每個 step 開始時重新評估；若實作途中超過 800 行，停下來拆分，不要合併過大的 PR。
@@ -559,17 +575,31 @@ derivation metadata
 
 ## step-5-a: Data Center client 介面與回應 schema
 
-- 預估程式碼：~600 行
+- 預估程式碼：~600 行（實際 685 行，依 §4 的算法；`src/stock_model_selection/data/`）
 - 拆分理由：完整的 client 邊界（介面、schema、假 client）預估約 1000 行。
 - 內容：
-  - `DataCenterClient` protocol：每個 v1 資料來源（§2）一個方法，加上 `/v1/stocks` 與 `/v1/trading-days`。特徵資料方法接受 `PitContext`，對應到 `information_as_of` / `knowledge_as_of`。給標籤 / 回測用的成交價、公司行動與指數方法接受明確日期；還原權息價格方法（`adjusted-prices-pit`，每次呼叫一檔股票）另外接受明確的 `information_as_of`，並保留 `events` 區塊。
-  - 依 §2「Data Center API」的回應 schema：`pit` 區塊、帶 `recorded_at`、`available_at`、`provenance` 的 observed 列；帶 `derivation` 區塊的衍生回應；financial-reports 的巢狀 `facts`
+  - `DataCenterClient` protocol：`docs/contracts/data-dependencies.md` §3–§5 的每個資料集一個方法（共 17 個），加上 `/v1/stocks` 與 `/v1/trading-days`。每個資料集方法都以必填的關鍵字參數 `pit: PitContext` 接收 PIT 情境；`start` / `end` 只選擇列的期間。
+  - 資料集 registry（`data/datasets.py`）：kind、keys、期間欄位、`derivation`、每次請求可帶幾個 stock_id；測試直接讀契約的表格比對。
+  - `build_query`：把 `PitContext` 對應到 `information_as_of` / `knowledge_as_of`，並拒絕超出 API 限制的單一請求（切分請求在 step-6）。
+  - 依 §2「Data Center API」的回應 schema：`pit` 區塊、帶 `recorded_at`、`available_at`、`provenance` 的 observed 列；帶 `derivation` 區塊的衍生回應；`technical-indicators-pit` 每列的 `information_as_of`；`adjusted-prices-pit` 的 `events`；股票清單與交易日曆。
   - Data Center 回傳的 `pit` 區塊保存在 provenance 中；若回應的 `pit.defaulted` 列出呼叫端有提供的截止點，則拒絕該回應
-  - 錯誤型別：缺 derivation version、PIT 違規、缺 provenance
+  - 錯誤型別：缺 derivation version、PIT 違規、缺 provenance；HTTP 400 / 401 / 404
 - 測試先行：
   - 沒有 `derivation_version` 或 provenance 的回應被拒絕
   - 回應回報截止點被預設的特徵請求被拒絕
   - 沒有任何特徵資料方法接受 `entry_date`
+- 決議：
+  - 只涵蓋契約 `data-dependencies.md` §3–§5 的資料集。原本列在這裡的公司行動與 financial-reports 的 `facts`，契約 §6 定為 v1 不直接使用（公司行動經由 `adjusted-prices-pit` 的 `events`），所以不做。
+  - 標籤與回測方法（`adjusted-prices-pit`、`indices`）同樣接收 `PitContext`，由 `LabelHorizon` 產生（`information_as_of = label_available_at`，D12），不另外接收裸的時間戳。任何方法都沒有 `datetime` 參數。
+  - 回應的每一列都以請求的 PIT 情境再檢查一次：`available_at` / 事件的 `available_at` / `technical-indicators-pit` 列的 `information_as_of` 不得晚於 `information_as_of`，`recorded_at` 不得晚於明確的 `knowledge_as_of`；`pit` 區塊必須回應送出的截止點。已儲存的衍生資料集必須在 `pit.aliases` 確認 `knowledge_as_of = latest`。
+  - 數值保持 Data Center 送來的樣子；小數以 `decode_json` 讀成 `Decimal`，解析後的回應中出現 `float` 一律拒絕。
+  - 測試 fixture 是錄製的真實回應（`tests/data/fixtures/responses/`，`scripts/record_data_center_fixtures.py` 產生，不含 API key 與 base URL）。
+  - 行數改為只算程式碼行，`scripts/` 的 fixture 工具不算（見 §4）。
+- 驗收：
+  - [x] 缺 `derivation_version`、缺 `derivation` 區塊、缺列或事件的 provenance，都被拒絕
+  - [x] `pit.defaulted` 列出送出的截止點時被拒絕；沒送出的截止點被預設（`view=rolling` 的 `information_as_of`）可以接受
+  - [x] 沒有任何方法接受 `entry_date` 或裸的截止點；每個資料集方法都必須帶 `PitContext`
+  - [x] 17 個資料集與股票清單、交易日曆的錄製回應都能解析
 
 ## step-5-b: 強制 PIT 的假 Data Center client
 
@@ -593,9 +623,9 @@ derivation metadata
   - 透過 §2 的 HTTP API 實作 `DataCenterClient` 的 adapter
   - 設定來自 `STOCKDC_BASE_URL` 與 `STOCKDC_API_KEY`；每個請求都帶 `X-API-Key`；repo 裡不放任何機密
   - 在 API 限制內切分請求：每個請求最多 200 個 stock_id，不帶 stock_id 時每個請求最多 31 天；結果以確定性方式合併
-  - HTTP 400 的 `detail` 以型別化錯誤拋出；不做會改變查詢內容的靜默重試
-  - 把回應對應到 schema；逐一驗證每個回應的 `derivation_version`
-- 測試先行：以錄製的回應做契約測試（CI 中不連網）；另有一個可選的線上 smoke test，加上標記並在 CI 中跳過。
+  - HTTP 錯誤以 step-5-a 的 `error_from_response` 轉成型別化錯誤；不做會改變查詢內容的靜默重試
+  - 每個請求以 step-5-a 的 `build_query` 建立，回應以 `decode_json` 解碼、以 step-5-a 的 parser 檢查；逐一驗證每個回應的 `derivation_version`
+- 測試先行：以錄製的回應做契約測試（CI 中不連網；錄製工具 `scripts/record_data_center_fixtures.py` 已在 step-5-a 加入）；另有一個可選的線上 smoke test，加上標記並在 CI 中跳過。
 - 平行線：step 7–21 對假 client 開發。本 step 必須在 step-22 之前合併。
 
 ---

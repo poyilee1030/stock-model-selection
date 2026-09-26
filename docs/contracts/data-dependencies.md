@@ -71,6 +71,6 @@ PIT 層級與兩種執行模式的定義見 [`time-and-cohort.md`](time-and-coho
 
 ## 7. 查詢限制（step-6 實作）
 
-- 每個請求最多 200 個 `stock_id`；不帶 `stock_id` 時，`start`–`end` 最多 31 天。
+- 每個請求最多 200 個 `stock_id`；不帶 `stock_id` 時，`start`–`end` 最多 31 天（含頭尾；2026-09-26 實測 201 個或 32 天回 400）。單一請求的限制由 step-5-a 的 `build_query` 檢查。
 - `technical-indicators-pit` 與 `adjusted-prices-pit` 每次只能一檔股票。實測 2330 完整歷史的 `view=rolling` 約 0.45 秒，全市場約 1800 檔。
 - 所有回應的 `pit` 區塊都存入 provenance。
