@@ -1,0 +1,10 @@
+[project]
+name = "violating"
+version = "0"
+dependencies = ["psycopg2-binary>=2.9", "requests"]
+
+[project.optional-dependencies]
+cache = ["Redis[hiredis]>=5"]
+
+[dependency-groups]
+dev = ["Stock_EPS.Model==1.0"]
