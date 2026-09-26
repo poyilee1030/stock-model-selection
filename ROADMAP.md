@@ -603,17 +603,23 @@ derivation metadata
 
 ## step-5-b: 強制 PIT 的假 Data Center client
 
-- 預估程式碼：~400 行
+- 預估程式碼：~400 行（實際 538 行，依 §4 的算法；`data/fake_store.py`、`data/fake_client.py`）
 - 內容：
   - 記憶體內的 fixture 儲存。每一列都有可用時間戳，假 client 只回傳在知識截止點可見的列。少了這個，資料洩漏測試什麼都偵測不到。
-  - fixture 建構器：掛牌 / 下市、有公布延遲的月營收、延後公布的季報 / 年報、價格、公司行動、調整因子會隨事件變為可見而改變的還原權息價格
+  - fixture 建構器：掛牌 / 下市、有公布延遲的月營收、價格、公司行動、調整因子會隨事件變為可見而改變的還原權息價格；其他資料集用通用的 `add_observed` / `add_derived` / `add_rolling_indicators`
   - 故障注入：錯誤的 derivation version、缺 provenance
 - 測試先行：
   - 截止點之後才公布的列被隱藏
-  - 能重現 step-1 的營收延遲與 Q4 時間軸
+  - 能重現 step-1 的營收延遲
+- 決議：
+  - 假 client 以 `build_query` 建立請求，每個回答都經過 step-5-a 的 parser，所以與真實 API 受同一套限制與回應契約檢查。
+  - 可見規則照 Data Center：每個 key 取 `available_at <= information_as_of` 且 `recorded_at <= knowledge_as_of` 的最新一列；已儲存的衍生資料集不看 `knowledge_as_of`（`latest`）；`view=rolling` 不看 `information_as_of`，所以要求超過 P_C 前一個交易日的列會被 parser 以 PIT 違規拒絕，與真實 API 相同。
+  - 還原權息價格照實測（2026-09-26）：事件要等到除權息日當天或之後的價格可見才開始調整；事件本身的 `available_at` 與 `recorded_at` 也要可見。事件缺 `reference_price` 或 `close_before` 時，它之前的 `adjustment_factor` 全為 null。
+  - 原本列在這裡的季報 / 年報 fixture 與「Q4 時間軸」測試不做：契約 `data-dependencies.md` §6 定 v1 不直接使用 financial-reports，client 沒有對應的方法。若 D21 決定直接使用財報，同一個 step 要把 financial-reports 加進契約、client 與假 client，並補上 Q4 時間軸測試（契約 time-and-cohort §10）。
+  - 公司行動只以 `adjusted-prices-pit` 的 `events` 出現（契約 §6），所以建構器產生的是事件，不是 `corporate-actions` 資料集。
 - 驗收：
-  - [ ] Data Center client 可被 mock
-  - [ ] 尚未開始訓練
+  - [x] Data Center client 可被 mock
+  - [x] 尚未開始訓練
 
 ## step-6: 真實 Data Center SDK adapter
 
@@ -756,6 +762,7 @@ z-score
     - 與 canonical 指標（§3）重複的轉換，除非附上 ADR id
   - 允許的 canonical 輸入以 `docs/contracts/feature-ownership.md` §2 為準
   - 開始前決定 D21：報酬、動能、波動度、ROA、利潤率向 Data Center 申請，或寫 ADR
+  - 若 D21 決定直接使用 financial-reports：同一個 step 更新 `data-dependencies.md`，在 client、假 client 加入 financial-reports，並補上 Q4 時間軸測試（step-5-b 決議）
 - 測試先行：任何規格變動都會改變 schema 雜湊，且每條拒絕規則都有一個失敗案例。
 
 ## step-10: 橫斷面轉換

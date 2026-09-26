@@ -3,7 +3,7 @@
 Phase 0 所有待決事項的決議。每一項寫明：決議、理由、影響的 step。
 變更任何一項，都要在同一個 PR 更新本文件、相關契約與 ROADMAP。
 
-- 最後更新：2026-09-26（step-2）
+- 最後更新：2026-09-26（step-5-b：D21 的附帶事項）
 - 相關契約：
   - [`contracts/time-and-cohort.md`](contracts/time-and-cohort.md)：時間與 cohort 語意
   - [`contracts/data-dependencies.md`](contracts/data-dependencies.md)：使用的 Data Center 資料集
@@ -197,7 +197,7 @@ Phase 0 所有待決事項的決議。每一項寫明：決議、理由、影響
 
 | # | 事項 | 延後到 | 需要什麼 |
 |---|---|---|---|
-| D21 | 報酬、動能、歷史波動度、ROA、利潤率 | step-9 | ROADMAP §3 把它們列為 Data Center 的 canonical 指標，但目前 Data Center 沒有提供。step-9 之前決定：向 Data Center 申請，或寫 ADR 後在本專案實作。v1 可以先不用這些特徵開始。見 [`contracts/feature-ownership.md`](contracts/feature-ownership.md) |
+| D21 | 報酬、動能、歷史波動度、ROA、利潤率 | step-9 | ROADMAP §3 把它們列為 Data Center 的 canonical 指標，但目前 Data Center 沒有提供。step-9 之前決定：向 Data Center 申請，或寫 ADR 後在本專案實作。v1 可以先不用這些特徵開始。見 [`contracts/feature-ownership.md`](contracts/feature-ownership.md)。若決定直接使用 financial-reports，同一個 step 要在 client 與假 client 加入它，並補上 Q4 時間軸測試（step-5-b） |
 | D22 | 投資組合檔數 K 與權重 | step-19 | 使用者決定。契約先以參數表示，預設等權重 |
 | D23 | 標籤期間內停牌或下市的處理 | step-12 | 提案見 [`contracts/backtest.md`](contracts/backtest.md) §5，step-12 定稿 |
 | D24 | 舊專案歷史輸出的取得方式 | step-22 | 使用者提供舊專案位置與可匯出的輸出格式；若沒有舊輸出，Phase 11 改寫 |
