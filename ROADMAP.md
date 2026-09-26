@@ -163,6 +163,30 @@ derived_on_demand：
     2448（2021-01-06 下市）沒有 2020 年的日價格
 股票池本身正確，但下市股票沒有特徵也沒有標籤，所以在 Data Center 回補之前
     存活者偏差仍然存在
+financial-reports 不含金融業公司的財報：金融保險業 42 檔（上市 33、上櫃 9）
+    沒有財報，例如 2881、2891 回傳 0 列；它們的 valuation-metrics（TTM EPS、PE、ROE）
+    與任何財報衍生特徵都是 null
+```
+
+資料新鮮度（2026-09-26 檢查）：
+
+```text
+各資料集的最後日期落後今天約兩週：
+    daily-prices、institutional-flows、margin-trading、securities-lending、
+        official-valuations、foreign-holdings 與日頻衍生資料集：2026-09-11
+    trading-days：2026-09-15（2026-09-14、09-15 已是交易日，但全市場沒有日價格）
+    indices：2026-09-16；shareholding-distributions：2026-09-18
+    monthly-revenues 到 2026-08 月營收；financial-reports 到 2026 Q2
+歷史研究不受影響；production 模式要求資訊截止點前最後一個交易日的資料已存在
+```
+
+基準指數（indices，2026-09-26 驗證）：
+
+```text
+含息報酬指數皆從 2020-01-02 起：
+    上市：twse_mi_index「報酬指數/臺灣證券交易所:發行量加權股價報酬指數」
+    上櫃：tpex_index_summary「報酬指數:櫃買指數」
+另有未含息的發行量加權股價指數、櫃買指數，以及上市櫃各產業報酬指數
 ```
 
 ---
@@ -372,7 +396,11 @@ Data Center API 介面：HTTP API，見 §2「Data Center API」
 標籤與回測的價格慣例：adjusted-prices-pit 總報酬或原始價格、開盤或收盤，
     以及讀取標籤時使用的 PIT 情境（label_available_at 或 latest；出場之後的事件
     會等比例縮放進場與出場價格，所以只有價格或事件事後被更正才會改變比值）
-基準指數
+金融保險業沒有財報（financial-reports 不含金融業）：v1 股票池排除金融保險業，
+    或保留它們並讓財報類特徵為缺值，或向 Data Center 申請金融業財報；排除規則若依
+    /v1/stocks 的 industry，要注意那是今日分類，下市股票為 null
+基準指數：資料已具備（見 §2「基準指數」）；在上市報酬指數、櫃買報酬指數或兩者
+    依股票池市值加權之間擇一，且與標籤的含息慣例一致
 v1 使用的模型函式庫
 artifact 儲存位置與格式
 用於雜湊的資料集序列化格式
@@ -558,6 +586,7 @@ derivation metadata
   - 2020-01-02 之前的 cohort 明確失敗（超出 Data Center 涵蓋範圍）
   - 快照帶 provenance 與內容雜湊
   - 防禦性檢查：若 Data Center 回傳截止點之後才掛牌的股票，則失敗
+  - 依 Phase 0 對金融保險業的決議套用排除規則（若決定排除）
 - 測試先行（永久保留）：
   - 排除未來才掛牌的股票
   - 之後才下市的股票仍具資格（例：2448 在 2021-01-05）
@@ -880,10 +909,12 @@ Data Center provenance
 - 內容：
   - 用模型 artifact 為目標 cohort 評分；確定性的排名與入選規則
   - artifact 種類：`production` 或 `reconstruction`
+  - production 執行前檢查資料新鮮度：資訊截止點前最後一個交易日（依 `/v1/trading-days`）若沒有日價格，或 `/v1/trading-days` 本身還沒涵蓋到截止點（交易日曆也會落後），則明確失敗，不產生排名
   - 只能寫入一次、拒絕覆寫的儲存；歷史重跑一律建立新的 reconstruction artifact
 - 測試先行：
   - 覆寫嘗試失敗
   - 重跑建立新的排名 ID
+  - 最後一個交易日缺日價格，或交易日曆未涵蓋到截止點時，production 排名失敗
   - 相同模型與資料產生相同排名
 
 ---
@@ -926,7 +957,7 @@ Data Center provenance
 
 - 預估程式碼：~400 行
 - 內容：
-  - 透過 Data Center 取得基準（來自 step-2）報酬
+  - 透過 Data Center `indices` 取得基準（來自 step-2）報酬，使用含息報酬指數
   - 超額報酬、累積報酬、回撤、周轉率、命中率
   - 帶排名 ID 與 provenance 的報告 artifact
 - 測試先行：已知值指標，以及缺 provenance 的報告會失敗。
