@@ -384,7 +384,7 @@ Data Center API 介面：HTTP API，見 §2「Data Center API」
 還原權息價格：Data Center adjusted-prices-pit（向後調整、含息、PIT）；不要在本專案
     從 corporate-actions 自行調整
 cohort 與時間語意（step-1）：月度 cohort；playbook date = 營收截止日（每月 10 日，
-    非交易日順延）後的第一個交易日；資訊截止點 = playbook date 08:00 台北時間；
+    非交易日順延）後的第一個交易日；資訊截止點 = playbook date 04:00 台北時間；
     出場日 = 下一個 cohort 進場日的前一個交易日；見 docs/contracts/time-and-cohort.md
 歷史 cohort 的 knowledge_as_of（step-1）：兩種模式的 information_as_of 都是 cohort 的
     資訊截止點；production 的 knowledge_as_of 為執行時點，reconstruction 為記錄在
