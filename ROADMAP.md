@@ -399,29 +399,31 @@ cohort 與時間語意（step-1）：月度 cohort；playbook date = 營收截�
     股票時，須同時補上 industry，或在 step-7 加入明列代號的排除清單
 ```
 
-待決：
+step-2 已解決（完整理由見 docs/decisions.md）：
 
 ```text
-實體化衍生資料集的重編風險（inputs = "latest"，例如 valuation-metrics 使用
-    財報最新版本的數值）：改用 *-pit 版本、向 Data Center 申請一個，
-    或逐資料集接受並記錄此風險
-資料集的存活者偏差：資料集沒有下市股票的歷史；向 Data Center 申請回補，
-    或在回補前記錄此偏差以及結果如何呈報
-產業分類不是 PIT：/v1/stocks 給的是今日產業（下市股票為 null）；決定 step-10
-    在 v1 是否使用產業相對標準化，若要，則向 Data Center 申請歷史產業分類
-    （需求規格：docs/requests/industry-classifications.md；居家生活、數位雲端、
-    綠能環保、運動休閒四類 2023-07-03 才出現，140 檔股票在此之前屬於別的類別）
-最早可用 cohort：歷史資料從 2020-01-02 開始；確定 walk-forward（step-16）的
-    第一個訓練 cohort 與第一個評估 cohort
-標籤與回測的價格慣例：adjusted-prices-pit 總報酬或原始價格、開盤或收盤，
-    以及讀取標籤時使用的 PIT 情境（label_available_at 或 latest；出場之後的事件
-    會等比例縮放進場與出場價格，所以只有價格或事件事後被更正才會改變比值）
-基準指數：資料已具備（見 §2「基準指數」）；在上市報酬指數、櫃買報酬指數或兩者
-    依股票池市值加權之間擇一，且與標籤的含息慣例一致
-v1 使用的模型函式庫
-artifact 儲存位置與格式
-用於雜湊的資料集序列化格式
-舊專案歷史輸出的取得方式（Phase 11 需要）
+D10 入選篩選：TTM EPS < 2（或 null）、P_C 前 7 個交易日平均成交量 < 500 張者不入選
+D11 訓練用整個股票池；評估只在通過入選篩選的股票上計算
+D12 價格慣例：adjusted-prices-pit 含息還原價；P_C 開盤進場、X_C 收盤出場；
+    以 information_as_of = label_available_at 讀取
+D13 基準：發行量加權股價報酬指數為主、櫃買報酬指數並列
+D14 第一個訓練 cohort 2021-01；第一個評估 cohort 2023-01
+D15 存活者偏差：Data Center 會回補下市股票；回補前每份報告註明
+D16 v1 不做產業相對標準化；需求見 docs/requests/industry-classifications.md
+D17 接受衍生資料集的重編風險並逐一記錄；技術指標改用 technical-indicators-pit；
+    向 Data Center 申請 valuation-metrics-pit
+D18 模型函式庫：LightGBM
+D19 artifact：本機資料夾 STOCKSEL_ARTIFACT_DIR，內容定址，寫入一次
+D20 資料集雜湊：標準形式 Arrow IPC stream 的 SHA-256
+```
+
+延後（見 docs/decisions.md「延後的事項」）：
+
+```text
+D21 報酬、動能、波動度、ROA、利潤率（Data Center 尚未提供的 canonical 指標） → step-9
+D22 投資組合檔數 K 與權重 → step-19
+D23 標籤期間內停牌 / 下市的處理 → step-12
+D24 舊專案歷史輸出的取得方式 → step-22
 ```
 
 驗收條件：
@@ -480,10 +482,10 @@ artifact 儲存位置與格式
   - `docs/adr/0000-template.md`：任何重新實作 canonical 指標都必須使用的 ADR 範本
   - `docs/decisions.md`：上列每個待決事項的決議
 - 驗收：
-  - [ ] v1 排除預測 EPS
-  - [ ] canonical 與模型專屬的所有權明確
-  - [ ] 每個 canonical 依賴都列出其 derivation version
-  - [ ] 每個待決事項都已解決或延後到指定的 step
+  - [x] v1 排除預測 EPS
+  - [x] canonical 與模型專屬的所有權明確
+  - [x] 每個 canonical 依賴都列出其 derivation version
+  - [x] 每個待決事項都已解決或延後到指定的 step
 
 ---
 
@@ -706,6 +708,8 @@ z-score
     - 被標記為標籤 / 未來報酬的輸入
     - 預測 EPS
     - 與 canonical 指標（§3）重複的轉換，除非附上 ADR id
+  - 允許的 canonical 輸入以 `docs/contracts/feature-ownership.md` §2 為準
+  - 開始前決定 D21：報酬、動能、波動度、ROA、利潤率向 Data Center 申請，或寫 ADR
 - 測試先行：任何規格變動都會改變 schema 雜湊，且每條拒絕規則都有一個失敗案例。
 
 ## step-10: 橫斷面轉換
@@ -756,10 +760,11 @@ label_available_at
   - `LabelSpec`：期間、價格慣例（來自 step-2）、`label_available_at`
   - 公司行動由 Data Center `adjusted-prices-pit`（向後調整、含息）處理；不要從 `corporate-actions` 自行實作調整
   - 報酬是在同一個 PIT 情境下讀取的調整後價格比值，所以之後的事件會等比例縮放兩端；進場或出場時的 `adjustment_factor` 或價格為 null，標籤為缺值而非零
-  - 期間內停牌 / 下市的明確政策
+  - 期間內停牌 / 下市的明確政策：以 `docs/contracts/backtest.md` §5 的提案定稿（D23），標籤與回測共用
+  - 標籤 = `adjusted_close(X_C) / adjusted_open(P_C) - 1`，以 `information_as_of = label_available_at` 讀取（D12）
   - 標籤是 `labels/` 中獨立的型別，不能傳進特徵建構器
 - 測試先行：
-  - 已知值報酬
+  - 已知值報酬：2330 的 2024-06 cohort（2024-06-12 開盤 → 2024-07-10 收盤）= +18.135%（原始價格 +17.68%）
   - 套用公司行動：期間內除息得到總報酬（2330 跨 2024-06-13），變更面額不影響報酬（2327 跨 2025-08-25）
   - 進場或出場時價格或 `adjustment_factor` 為 null，得到缺值標籤
   - 依契約計算 `label_available_at`
@@ -813,6 +818,7 @@ git commit
 - 內容：
   - 對目標 C：逐一獨立建構每個符合資格的 cohort（step 8、11），並接上其標籤（step-12），以 step-13 過濾
   - C 的推論矩陣另外建構，只有特徵
+  - 訓練用整個股票池，不套用入選篩選（D11）
   - 以下每一種情況都明確失敗：
     - 訓練資料中出現目標 cohort 的列
     - 未完整的標籤
@@ -853,8 +859,8 @@ Top-K 命中率
 - 預估程式碼：~550 行
 - 內容：
   - 排程：對目標 cohort 使用擴展式，以及明確記錄的滾動式視窗。訓練集來自 step-13，不另做 embargo 邏輯。
-  - 排程不早於 Phase 0 確定的第一個訓練 cohort（Data Center 歷史資料從 2020-01-02 開始）
-  - 上列指標
+  - 第一個訓練 cohort 2021-01，第一個評估 cohort 2023-01（D14）
+  - 上列指標；主要指標只在通過入選篩選的股票上計算，整個股票池的 IC 並列參考（D11）
   - 主要評估不使用隨機切分
 - 測試先行：
   - 排程絕不把目標 cohort 或之後的 cohort 放進訓練
@@ -864,7 +870,7 @@ Top-K 命中率
 
 - 預估程式碼：~500 行
 - 內容：
-  - 模型介面與 v1 模型（函式庫來自 step-2）；超參數設定；固定 seed 與確定性設定
+  - 模型介面與 v1 模型（LightGBM，D18）；超參數設定；固定 seed 與確定性設定
   - 執行器：對每個目標 cohort，組裝資料集 → 訓練 → 預測 → 評估，然後寫出執行報告
 - 測試先行：
   - 相同 seed 與資料產生相同預測
@@ -931,7 +937,9 @@ Data Center provenance
 
 - 預估程式碼：~500 行
 - 內容：
-  - 用模型 artifact 為目標 cohort 評分；確定性的排名與入選規則
+  - 用模型 artifact 為目標 cohort 評分；確定性的排名與入選規則，依 `docs/contracts/ranking.md`
+  - 入選篩選（D10）：TTM EPS ≥ 2（null 不通過）、P_C 前 7 個交易日平均成交量 ≥ 500 張；未通過者保留分數與原因，沒有名次
+  - 開始前決定投資組合檔數 K 與權重（D22）
   - artifact 種類：`production` 或 `reconstruction`
   - production 執行前檢查資料新鮮度：資訊截止點前最後一個交易日（依 `/v1/trading-days`）若沒有日價格，或 `/v1/trading-days` 本身還沒涵蓋到截止點（交易日曆也會落後），則明確失敗，不產生排名
   - 只能寫入一次、拒絕覆寫的儲存；歷史重跑一律建立新的 reconstruction artifact
@@ -940,6 +948,7 @@ Data Center provenance
   - 重跑建立新的排名 ID
   - 最後一個交易日缺日價格，或交易日曆未涵蓋到截止點時，production 排名失敗
   - 相同模型與資料產生相同排名
+  - TTM EPS < 2、TTM EPS 為 null、7 日均量 < 500 張的股票不入選，且各自記錄原因
 
 ---
 
@@ -970,7 +979,7 @@ Data Center provenance
 - 內容：
   - 載入排名 artifact 並驗證其雜湊
   - 建構投資組合，進場 / 出場價格來自 Data Center；報酬來自 `adjusted-prices-pit`（總報酬），依 step-2 決定的價格慣例
-  - 停牌 / 下市處理；成本模型
+  - 停牌 / 下市處理；成本模型（手續費買賣各 0.1425%、證交稅賣出 0.3%，見 `docs/contracts/backtest.md`）
   - import 邊界守衛：`backtest/` 不得 import `features/`、`training/` 或資料集建構器
 - 測試先行：
   - 被竄改的排名被拒絕
@@ -981,7 +990,8 @@ Data Center provenance
 
 - 預估程式碼：~400 行
 - 內容：
-  - 透過 Data Center `indices` 取得基準（來自 step-2）報酬，使用含息報酬指數
+  - 透過 Data Center `indices` 取得基準報酬（D13）：發行量加權股價報酬指數為主、櫃買報酬指數並列；`close(X_C) / close(P_C 前一個交易日) - 1`
+  - 報告的必要註明見 `docs/contracts/backtest.md` §7
   - 超額報酬、累積報酬、回撤、周轉率、命中率
   - 帶排名 ID 與 provenance 的報告 artifact
 - 測試先行：已知值指標，以及缺 provenance 的報告會失敗。
@@ -1005,7 +1015,7 @@ Q4 / 2–3 月的可見性
 ## step-22: 舊輸出匯入與比較工具
 
 - 預估程式碼：~400 行
-- 依賴：step-2（舊輸出的取得方式）、step-6（真實 Data Center 資料）
+- 依賴：step-2（舊輸出的取得方式，D24 延後至此，需使用者提供）、step-6（真實 Data Center 資料）
 - 內容：
   - 以匯出的資料檔讀取舊專案的歷史排名 / 回測結果。不複製舊程式碼。
   - 對齊 cohort；計算排名相關係數、Top-K 重疊、績效差異
