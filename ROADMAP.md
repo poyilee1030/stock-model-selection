@@ -182,6 +182,7 @@ financial-reports 不含金融業公司的財報：/v1/stocks 的 industry 為�
     daily-prices、institutional-flows、margin-trading、securities-lending、
         official-valuations、foreign-holdings 與日頻衍生資料集：2026-09-11
     trading-days：2026-09-15（2026-09-14、09-15 已是交易日，但全市場沒有日價格）
+        不含未來日期：查到 2026-12-31 也只回到 2026-09-15（step-4 實測）
     indices：2026-09-16；shareholding-distributions：2026-09-18
     monthly-revenues 到 2026-08 月營收；financial-reports 到 2026 Q2
 歷史研究不受影響；production 模式要求資訊截止點前最後一個交易日的資料已存在
@@ -529,10 +530,10 @@ derivation metadata
 
 ## step-4: PIT 與 cohort 領域模型
 
-- 預估程式碼：~450 行
+- 預估程式碼：~450 行（實際 ~440 行，`src/stock_model_selection/domain/`）
 - 內容：
   - `PitContext`（資訊 / 知識 / 系統截止點，含先後順序驗證）
-  - `Cohort`（id、playbook date、進場 / 出場、期間、`label_available_at`）
+  - `Cohort`（id、playbook date、進場日、資訊截止點）與 `LabelHorizon`（出場日、期間、`label_available_at`）
   - `DerivationRef`（`dataset_code`、`derivation_version`）與 provenance 紀錄型別
   - 抓取特徵的 API 只接受 `PitContext`，絕不接受單純日期
 - 測試先行：
@@ -541,6 +542,20 @@ derivation metadata
   - 截止點順序違規時拋出例外
   - 沒有版本的 `DerivationRef` 拋出例外
   - `docs/contracts/time-and-cohort.md` §12 列出的不變條件，包括 playbook date、出場日與 `label_available_at` 的日曆計算
+- 決議：
+  - `Cohort` 與 `LabelHorizon` 分開：`/v1/trading-days` 不含未來日期，出場日要等下個月的 playbook date 進了日曆才算得出來；決策（特徵、排名）只需要 `Cohort`，不必等到下個月。
+  - 交易日曆的涵蓋範圍是回傳的第一天到最後一天；需要範圍外日期的問題一律拋出 `CalendarCoverageError`，不推測。
+  - 測試用 repo 內的交易日曆 fixture（`tests/domain/fixtures/trading_days.txt`，2026-09-26 從 Data Center 取得，2020-01-02 到 2026-09-15），CI 不連網。
+  - production 的 `knowledge_as_of`（執行時點）必須落在 T_C ≤ t_run < P_C 09:00 開盤（契約 §5）；由 `Cohort.production_context` 檢查。
+  - 特徵與標籤 API 以 `require_market_pit` 作為入口檢查：`None`、日期、時間戳、audit 模式一律拒絕。
+  - 已儲存的衍生資料集只接受 `knowledge_as_of=latest`（實測送明確時間戳回 400）：`PitContext` 保持明確時間戳，`ProvenanceRecord.knowledge`（`explicit` / `latest`）記錄實際送出的值；`latest` 只允許用在衍生資料集（code review 修正）。
+  - §12 的不變條件 7 在 step-13、8 在 step-7 實作並測試（兩者原本就在那兩個 step 的測試清單中）。
+  - 契約 §7 的標籤期間長度更正為 12–23 個交易日（原寫約 19–23）；80 個 cohort 中 10 個較短，都是農曆年或連假所在的月份。
+- 驗收：
+  - [x] 缺 PIT 情境、以日期或 `entry_date` 代替 `PitContext`、audit 模式用於特徵或標籤，都拋出例外
+  - [x] 沒有時區的截止點、production 截止點順序違規，都拋出例外
+  - [x] 沒有版本的 `DerivationRef` 拋出例外
+  - [x] §12 不變條件 1–6 通過，含契約所有例子的日期與 2020-01 到 2026-08 共 80 個 cohort 的 `label_available_at(C) < T_{C+1}`
 
 ## step-5-a: Data Center client 介面與回應 schema
 

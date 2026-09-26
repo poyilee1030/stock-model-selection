@@ -22,7 +22,7 @@ PIT 層級與兩種執行模式的定義見 [`time-and-cohort.md`](time-and-coho
 | 端點 | 用途 | 查詢方式 | 風險與處理 |
 |---|---|---|---|
 | `/v1/stocks?date=P_C` | 股票池的掛牌狀態、市場、產業（只用於排除金融保險業） | `date` = P_C | 原地更新：快照記錄回應雜湊，重建時若不同就回報（step-7）。`industry` 是今日分類（D16） |
-| `/v1/trading-days` | 營收截止日、playbook date、出場日、7 日均量的交易日 | `start` / `end` | 原地更正：日曆記錄回應雜湊。未涵蓋到截止點時，production 失敗（step-19） |
+| `/v1/trading-days` | 營收截止日、playbook date、出場日、7 日均量的交易日 | `start` / `end` | 原地更正：日曆記錄回應雜湊。不含未來日期，所以日曆的涵蓋範圍是回傳的第一天到最後一天，範圍外的問題一律失敗（step-4）。建立 cohort 需要涵蓋到 P_C，建立標籤期間需要涵蓋到 P_{C+1}。未涵蓋到截止點時，production 失敗（step-19） |
 
 ## 3. 股票池與入選篩選
 

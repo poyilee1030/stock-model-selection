@@ -107,6 +107,7 @@ playbook date P_M  D_M 之後的第一個交易日（嚴格晚於 D_M）
   - 例如 `valuation-metrics`、`technical-indicators`。傳入明確時間戳會回 400，即使那個時間戳就是一分鐘前。
   - 使用這類資料集時，兩種模式都傳 `latest`。
   - 同時在 provenance 記錄回應中的 `pit` 區塊與每列的 `computed_at`，並把回傳列納入資料集雜湊。
+  - `PitContext` 仍是 cohort 的明確時間戳，不改成 `latest`；provenance 紀錄以 `knowledge = latest` 註明實際送出的是 `latest`（step-4 的 `ProvenanceRecord`）。只有衍生資料集可以這樣記錄。
   - 這類資料集重跑時不保證得到相同數值，這是已知限制。
 - observed 資料集與即時計算的 `*-pit` 資料集接受明確的 `knowledge_as_of`。在重建模式下，同一個 t_recon 可以重現相同結果，前提是 Data Center 不刪除紀錄。
 
@@ -145,11 +146,12 @@ playbook date P_M  D_M 之後的第一個交易日（嚴格晚於 D_M）
 ```text
 進場日 E_C             = P_C
 出場日 X_C             = P_{C+1} 的前一個交易日
-標籤期間                = [E_C, X_C]，長度隨月份不同，約 19–23 個交易日
+標籤期間                = [E_C, X_C]，長度隨月份不同，12–23 個交易日
 label_available_at(C)  = 出場日日價格列的 available_at
                          規則為 exchange_daily_settled@1：X_C 的下一個日曆日 03:00 Asia/Taipei
 ```
 
+- 標籤期間的長度（2020-01 到 2026-08 共 80 個 cohort，以 `/v1/trading-days` 計算，step-4 實測）：70 個落在 19–23 個交易日；其餘 10 個是農曆年或連假所在的 cohort，最短的是 2026-02（12 個交易日）。
 - 用開盤價還是收盤價、還原還是原始價格，於 step-2 決定。上面的日期與價格慣例無關，因為同一天的開盤價與收盤價在同一列、同時可用。
 - `label_available_at` 以實際查到的 `available_at` 為準。資料尚未存在時，以上述規則推算的值作為下限，實際值只會更晚。
 - 標籤期間內的除權息事件，其可見時點是除權息日 00:00，早於出場日，所以在 `label_available_at` 時都已可見。
@@ -269,3 +271,10 @@ K 早於 C
 6. 對每個 cohort C，`label_available_at(C) < T_{C+1}`。
 7. 目標 cohort C 的訓練集不含 C 本身與之後的 cohort，也不含 `label_available_at > T_C` 的 cohort。
 8. M-1 月營收在 T_C 不可見的股票不在 cohort C 的股票池中。
+
+實作位置：
+
+1–6 由 step-4 的領域模型實作，測試在 `tests/domain/`。7 與 8 需要標籤價格與股票池資料，由已在 ROADMAP 寫明的 step 實作並測試；step-4 只提供它們用到的領域量（`LabelHorizon.label_available_at`、`Cohort.information_cutoff`、`Cohort.revenue_month`）。
+
+- 7 → step-13（標籤資格閘門）
+- 8 → step-7（符合 PIT 的歷史股票池）
