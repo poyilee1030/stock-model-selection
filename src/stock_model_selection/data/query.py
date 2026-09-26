@@ -45,6 +45,9 @@ def build_query(
 ) -> DatasetQuery:
     pit = require_market_pit(pit)
     assert pit.information_as_of is not None and pit.knowledge_as_of is not None
+    if isinstance(stock_ids, str):
+        # a str is a Sequence[str]; "2317" would become 2, 3, 1, 7
+        raise RequestLimitError(f"{spec.name}: stock_ids must be a list, got {stock_ids!r}")
     ids = list(stock_ids or ())
     if end < start:
         raise RequestLimitError(f"{spec.name}: end {end} is before start {start}")

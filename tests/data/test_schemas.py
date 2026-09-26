@@ -408,3 +408,58 @@ def test_unexpected_error_status_keeps_its_body() -> None:
     assert type(exc) is DataCenterRequestError
     assert exc.status == 503
     assert exc.detail == "upstream down"
+
+
+# code review: adjusted prices carry no available_at; a price is public from
+# exchange_daily_settled@1, its trade date's next day at 03:00 Asia/Taipei
+
+
+def adjusted_at(cutoff: datetime) -> tuple[DatasetQuery, Any]:
+    body = recorded("adjusted-prices-pit").fresh_body()
+    body["pit"]["information_as_of"] = cutoff.isoformat()
+    body["events"] = []
+    pit = PitContext.reconstruction(information_as_of=cutoff, knowledge_as_of=T_RECON)
+    query = build_query(
+        DATASETS["adjusted-prices-pit"], pit, date(2024, 6, 12), date(2024, 6, 14), ["2330"]
+    )
+    return query, body
+
+
+def test_adjusted_price_not_yet_public_is_refused() -> None:
+    # Data Center answers this context with the 06-12 row only
+    query, body = adjusted_at(datetime(2024, 6, 13, 3, 0, tzinfo=TAIPEI))
+    body["rows"] = body["rows"][:2]  # 06-12 and 06-13
+    with pytest.raises(PitViolationError):
+        parse_adjusted_prices(query, body)
+    body["rows"] = body["rows"][:1]
+    assert [r.period for r in parse_adjusted_prices(query, body).rows] == [date(2024, 6, 12)]
+
+
+def test_adjusted_price_public_exactly_at_the_cutoff_is_accepted() -> None:
+    query, body = adjusted_at(datetime(2024, 6, 14, 3, 0, tzinfo=TAIPEI))
+    body["rows"] = body["rows"][:2]
+    assert len(parse_adjusted_prices(query, body).rows) == 2
+    body["rows"] = recorded("adjusted-prices-pit").fresh_body()["rows"]
+    with pytest.raises(PitViolationError):
+        parse_adjusted_prices(query, body)
+
+
+# code review: every malformed derivation block is a response error
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("dataset_code", None),
+        ("dataset_code", ""),
+        ("dataset_code", 7),
+        ("derivation_version", None),
+        ("derivation_version", ""),
+        ("derivation_version", 1),
+    ],
+)
+def test_malformed_derivation_field_is_a_response_error(field: str, value: object) -> None:
+    body = recorded("valuation-metrics").fresh_body()
+    body["derivation"][field] = value
+    with pytest.raises(MissingDerivationError):
+        parse("valuation-metrics", body)

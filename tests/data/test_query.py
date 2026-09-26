@@ -169,3 +169,12 @@ def test_duplicate_stock_ids_are_refused() -> None:
             date(2024, 7, 10),
             ["2330", "2330"],
         )
+
+
+def test_a_bare_string_is_not_a_list_of_stock_ids() -> None:
+    # a str is a Sequence[str] to mypy; "2317" must not become 2, 3, 1, 7
+    for name in ("daily-prices", "adjusted-prices-pit"):
+        with pytest.raises(RequestLimitError):
+            build_query(
+                DATASETS[name], FEATURES, date(2024, 7, 10), date(2024, 7, 10), cast(Any, "2317")
+            )

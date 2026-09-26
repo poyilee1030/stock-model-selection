@@ -10,7 +10,7 @@ binary float in a parsed body is refused.
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -29,7 +29,7 @@ from stock_model_selection.data.query import DatasetQuery
 from stock_model_selection.domain.calendar import TradingCalendar
 from stock_model_selection.domain.errors import InvalidCutoffError
 from stock_model_selection.domain.provenance import DerivationRef, ProvenanceRecord
-from stock_model_selection.domain.time import require_aware
+from stock_model_selection.domain.time import DAILY_SETTLED_TIME, at_taipei, require_aware
 
 Scalar = str | int | Decimal | None
 
@@ -206,10 +206,13 @@ def _derivation(body: Mapping[str, Any], name: str) -> DerivationRef:
     block = body.get("derivation")
     if not isinstance(block, dict):
         raise MissingDerivationError(f"{name}: the response has no derivation block")
+    fields = []
     for key in ("dataset_code", "derivation_version"):
-        if key not in block:
-            raise MissingDerivationError(f"{name}: the derivation block has no {key}")
-    return DerivationRef(block["dataset_code"], block["derivation_version"])
+        value = block.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise MissingDerivationError(f"{name}: the derivation block has no {key}: {value!r}")
+        fields.append(value)
+    return DerivationRef(*fields)
 
 
 @dataclass(frozen=True)
@@ -452,13 +455,15 @@ def parse_adjusted_prices(query: DatasetQuery, body: object) -> AdjustedPricesRe
     for i, raw in enumerate(env.rows):
         what = f"{name} row {i}"
         row = _object(raw, what)
-        rows.append(
-            AdjustedPriceRow(
-                keys=_keys(row, spec, what),
-                period=_required_date(row, spec.period, what),
-                values=_values(row, set(spec.keys), what),
-            )
+        price = AdjustedPriceRow(
+            keys=_keys(row, spec, what),
+            period=_required_date(row, spec.period, what),
+            values=_values(row, set(spec.keys), what),
         )
+        # rows carry no available_at: a price is public from exchange_daily_settled@1
+        public_at = at_taipei(price.period + timedelta(days=1), DAILY_SETTLED_TIME)
+        _not_after(public_at, pit.information_as_of, f"{what} price public at", "information_as_of")
+        rows.append(price)
     events = []
     for i, raw in enumerate(_list(env.body.get("events"), f"{name} events")):
         what = f"{name} event {i}"

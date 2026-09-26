@@ -591,7 +591,7 @@ derivation metadata
 - 決議：
   - 只涵蓋契約 `data-dependencies.md` §3–§5 的資料集。原本列在這裡的公司行動與 financial-reports 的 `facts`，契約 §6 定為 v1 不直接使用（公司行動經由 `adjusted-prices-pit` 的 `events`），所以不做。
   - 標籤與回測方法（`adjusted-prices-pit`、`indices`）同樣接收 `PitContext`，由 `LabelHorizon` 產生（`information_as_of = label_available_at`，D12），不另外接收裸的時間戳。任何方法都沒有 `datetime` 參數。
-  - 回應的每一列都以請求的 PIT 情境再檢查一次：`available_at` / 事件的 `available_at` / `technical-indicators-pit` 列的 `information_as_of` 不得晚於 `information_as_of`，`recorded_at` 不得晚於明確的 `knowledge_as_of`；`pit` 區塊必須回應送出的截止點。已儲存的衍生資料集必須在 `pit.aliases` 確認 `knowledge_as_of = latest`。
+  - 回應的每一列都以請求的 PIT 情境再檢查一次：`available_at` / 事件的 `available_at` / `technical-indicators-pit` 列的 `information_as_of` / `adjusted-prices-pit` 列的公布時點（沒有 `available_at`，依 `exchange_daily_settled@1` 為交易日隔天 03:00）不得晚於 `information_as_of`，`recorded_at` 不得晚於明確的 `knowledge_as_of`；`pit` 區塊必須回應送出的截止點。已儲存的衍生資料集必須在 `pit.aliases` 確認 `knowledge_as_of = latest`。
   - 數值保持 Data Center 送來的樣子；小數以 `decode_json` 讀成 `Decimal`，解析後的回應中出現 `float` 一律拒絕。
   - 測試 fixture 是錄製的真實回應（`tests/data/fixtures/responses/`，`scripts/record_data_center_fixtures.py` 產生，不含 API key 與 base URL）。
   - 行數改為只算程式碼行，`scripts/` 的 fixture 工具不算（見 §4）。
