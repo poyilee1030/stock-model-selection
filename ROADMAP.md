@@ -409,6 +409,8 @@ cohort 與時間語意（step-1）：月度 cohort；playbook date = 營收截�
     或在回補前記錄此偏差以及結果如何呈報
 產業分類不是 PIT：/v1/stocks 給的是今日產業（下市股票為 null）；決定 step-10
     在 v1 是否使用產業相對標準化，若要，則向 Data Center 申請歷史產業分類
+    （需求規格：docs/requests/industry-classifications.md；居家生活、數位雲端、
+    綠能環保、運動休閒四類 2023-07-03 才出現，140 檔股票在此之前屬於別的類別）
 最早可用 cohort：歷史資料從 2020-01-02 開始；確定 walk-forward（step-16）的
     第一個訓練 cohort 與第一個評估 cohort
 標籤與回測的價格慣例：adjusted-prices-pit 總報酬或原始價格、開盤或收盤，
